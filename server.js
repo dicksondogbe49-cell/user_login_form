@@ -346,7 +346,9 @@ function emailCodeDigest(tokenHash, code) {
 }
 
 const allowOtpFallback = !['0', 'false'].includes(String(process.env.ALLOW_OTP_FALLBACK || 'true').toLowerCase());
-const emailWebhookUrl = (process.env.EMAIL_WEBHOOK_URL || 'https://title-wireless-incorporated-cakes.trycloudflare.com/api/email-relay').trim();
+const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
+const resendFromEmail = (process.env.RESEND_FROM_EMAIL || '').trim();
+const emailWebhookUrl = (process.env.EMAIL_WEBHOOK_URL || '').trim();
 const forceSharedOtpEmail = ['1', 'true'].includes(String(process.env.FORCE_SHARED_OTP_EMAIL || '').toLowerCase());
 
 function createMailTransporter() {
@@ -383,8 +385,63 @@ async function sendViaEmailWebhook(payload) {
   }
 }
 
+async function sendViaResend({ fromLabel = 'Secure Hospital Portal', to, subject, text, html, attachments }) {
+  const from = resendFromEmail || `${fromLabel} <onboarding@resend.dev>`;
+  const payload = {
+    from,
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    text,
+    html,
+  };
+  if (Array.isArray(attachments) && attachments.length) {
+    payload.attachments = attachments.map((att) => {
+      let content = att.content;
+      if (Buffer.isBuffer(content)) {
+        content = content.toString('base64');
+      } else if (typeof content === 'string') {
+        content = Buffer.from(content).toString('base64');
+      }
+      return {
+        filename: att.filename,
+        content,
+      };
+    });
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Resend API HTTP ${response.status}: ${errorBody}`);
+  }
+}
+
 async function deliverEmail({ fromLabel = 'Secure Hospital Portal', to, subject, text, html, attachments }) {
   let lastError = null;
+
+  // 1. Resend HTTPS REST API (Port 443 — works seamlessly across cloud platforms including Render free tier)
+  if (resendApiKey) {
+    try {
+      console.log('Dispatching email via Resend HTTPS API (port 443)...');
+      await sendViaResend({ fromLabel, to, subject, text, html, attachments });
+      console.log('Email delivered successfully via Resend HTTPS API.');
+      return;
+    } catch (resendError) {
+      lastError = resendError;
+      console.warn('Resend HTTPS dispatch failed:', resendError.message);
+    }
+  }
+
+  // 2. Direct SMTP
   if (smtpUser && smtpAppPassword) {
     try {
       const transporter = createMailTransporter();
