@@ -208,13 +208,28 @@ export default function App() {
 
   if (authStage === 'loading') return <Centered><ActivityIndicator size="large" color={COLORS.blue} /><Text style={styles.muted}>Connecting securely…</Text></Centered>;
   if (authStage === 'verify') return <AuthLayout title="Verify your email" subtitle={`Enter the six digit code sent to ${authInfo?.verificationEmail || authInfo?.username || 'your email'}. Check your inbox.`} error={error}>
+    {authInfo?.emailNotice ? <Banner text={authInfo.emailNotice} tone="warning" /> : null}
     <FormField label="Verification code" value={verifyCode} onChangeText={setVerifyCode} keyboardType="number-pad" placeholder="000000" maxLength={6} />
     <Button title="Verify and continue" loading={busy} onPress={async () => {
       setBusy(true); setError('');
       try { await api('/api/2fa/verify', { method: 'POST', body: { code: verifyCode.trim() } }); const session = await api('/api/session'); setUser(session); setAuthStage('app'); setVerifyCode(''); }
       catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
     }} />
-    <Button title="Resend code" variant="quiet" onPress={async () => { await action('Code resent to your email', '/api/2fa/resend', { method: 'POST' }); }} />
+    <Button title="Resend code" variant="quiet" onPress={async () => {
+      setBusy(true); setError('');
+      try {
+        const res = await api('/api/2fa/resend', { method: 'POST' });
+        if (res?.emailNotice) {
+          setAuthInfo((prev) => ({ ...prev, emailNotice: res.emailNotice }));
+        } else {
+          setNotice('Code resent to your email');
+        }
+      } catch (e) {
+        setError(errorMessage(e));
+      } finally {
+        setBusy(false);
+      }
+    }} />
     <Button title="Use a different account" variant="quiet" onPress={signOut} />
   </AuthLayout>;
 
@@ -289,8 +304,8 @@ function PasswordReset({ api, resetToken, setResetToken, resetEmail, setResetEma
   const resendCode = async () => {
     setBusy(true); setError(''); setNotice('');
     try {
-      await api('/api/forgot-password/resend', { method: 'POST', resetToken });
-      setNotice('A new reset code has been sent to your email.');
+      const res = await api('/api/forgot-password/resend', { method: 'POST', resetToken });
+      setNotice(res?.emailNotice || 'A new reset code has been sent to your email.');
     } catch (e) { setError(errorMessage(e)); }
     finally { setBusy(false); }
   };
@@ -301,6 +316,7 @@ function PasswordReset({ api, resetToken, setResetToken, resetEmail, setResetEma
         const result = await api('/api/forgot-password', { method: 'POST', body: { email }, mobile: true });
         if (!result.resetToken) { setNotice('If that address has a verified account, a reset code has been sent. Check the inbox and try again in a moment.'); return; }
         setResetToken(result.resetToken); setResetEmail(email); setCode(''); setResetStep(2);
+        if (result.emailNotice) setNotice(result.emailNotice);
       } else if (resetStep === 2) {
         await api('/api/forgot-password/verify', { method: 'POST', body: { code }, resetToken }); setResetStep(3);
       } else {
@@ -315,7 +331,7 @@ function PasswordReset({ api, resetToken, setResetToken, resetEmail, setResetEma
     {resetStep === 1 ? <FormField label="Email address" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" /> : null}
     {resetStep === 2 ? <FormField label="Six digit reset code" value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6} /> : null}
     {resetStep === 3 ? <><FormField label="New password" value={password} onChangeText={setPassword} secureTextEntry /><FormField label="Confirm password" value={confirm} onChangeText={setConfirm} secureTextEntry /></> : null}
-    <Button title={['Send reset code', 'Verify code', 'Update password'][resetStep - 1]} onPress={submit} loading={busy} />{resetStep === 2 ? <Button title="Resend reset code" variant="quiet" onPress={resendCode} loading={busy} /> : null}<Button title="Back to sign in" variant="quiet" onPress={onBack} />{notice ? <Banner text={notice} tone="success" /> : null}
+    <Button title={['Send reset code', 'Verify code', 'Update password'][resetStep - 1]} onPress={submit} loading={busy} />{resetStep === 2 ? <Button title="Resend reset code" variant="quiet" onPress={resendCode} loading={busy} /> : null}<Button title="Back to sign in" variant="quiet" onPress={onBack} />{notice ? <Banner text={notice} tone="warning" /> : null}
   </AuthLayout>;
 }
 
@@ -329,7 +345,7 @@ function Button({ title, onPress, variant = 'primary', loading = false, disabled
   </Pressable>;
 }
 
-function Banner({ text, tone = 'success' }) { return <View style={[styles.banner, tone === 'error' ? styles.bannerError : styles.bannerSuccess]}><Text style={styles.bannerText}>{text}</Text></View>; }
+function Banner({ text, tone = 'success' }) { return <View style={[styles.banner, tone === 'error' ? styles.bannerError : tone === 'warning' ? styles.bannerWarning : styles.bannerSuccess]}><Text style={styles.bannerText}>{text}</Text></View>; }
 
 function Card({ title, count, children, style }) {
   return <View style={[styles.card, style]}><View style={styles.cardHeading}><Text style={styles.cardTitle}>{title}</Text>{count !== undefined ? <Text style={styles.cardCount}>{count}</Text> : null}</View>{children}</View>;
@@ -445,5 +461,5 @@ const styles = StyleSheet.create({
   bodyText: { color: '#4c6372', fontSize: 13, lineHeight: 20 }, listLine: { color: COLORS.ink, fontSize: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#eef2f5' }, bold: { fontWeight: '800' }, muted: { color: COLORS.muted, fontSize: 12, lineHeight: 18 }, record: { borderTopWidth: 1, borderTopColor: '#edf1f4', paddingVertical: 12 }, recordTitle: { color: COLORS.ink, fontSize: 13, fontWeight: '800' }, recordSubtitle: { color: COLORS.muted, fontSize: 11, marginTop: 4 }, recordDetail: { color: '#435967', fontSize: 12, marginTop: 7, lineHeight: 18 },
   tabBar: { flexDirection: 'row', backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: COLORS.line, paddingBottom: Platform.OS === 'ios' ? 4 : 0 }, tab: { flex: 1, paddingVertical: 13, alignItems: 'center' }, tabActive: { borderTopWidth: 3, borderTopColor: COLORS.blue }, tabText: { color: COLORS.muted, fontSize: 12, fontWeight: '700' }, tabTextActive: { color: COLORS.blue },
   authRoot: { flex: 1, backgroundColor: '#edf4f8' }, authScroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 23, paddingVertical: 35 }, authMark: { width: 48, height: 48, borderRadius: 15, backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 13 }, authMarkText: { color: COLORS.white, fontSize: 30, fontWeight: '300', lineHeight: 34 }, brandAuth: { color: COLORS.blue, textAlign: 'center', fontSize: 10, fontWeight: '900', letterSpacing: 1.4 }, authTitle: { color: COLORS.navy, textAlign: 'center', fontSize: 27, lineHeight: 34, fontWeight: '900', marginTop: 12 }, authSubtitle: { color: COLORS.muted, textAlign: 'center', fontSize: 13, lineHeight: 20, marginTop: 6, marginBottom: 19 }, authCard: { backgroundColor: COLORS.white, padding: 19, borderRadius: 17, borderColor: COLORS.line, borderWidth: 1 },
-  field: { marginBottom: 13 }, fieldLabel: { color: COLORS.ink, fontSize: 12, fontWeight: '800', marginBottom: 6 }, input: { minHeight: 47, borderColor: '#cfdae2', borderWidth: 1, borderRadius: 9, color: COLORS.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: '#fff', textAlignVertical: 'top' }, button: { minHeight: 46, borderRadius: 9, backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 11, marginTop: 10 }, dangerButton: { backgroundColor: COLORS.red }, successButton: { backgroundColor: COLORS.green }, quietButton: { backgroundColor: '#eef5f8', borderWidth: 1, borderColor: '#d7e5ec' }, buttonText: { color: COLORS.white, fontSize: 13, fontWeight: '800', textAlign: 'center' }, quietButtonText: { color: COLORS.blue }, buttonDisabled: { opacity: 0.55 }, buttonPressed: { opacity: 0.82 }, roleWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 14 }, roleChip: { backgroundColor: '#f4f7f9', borderWidth: 1, borderColor: COLORS.line, borderRadius: 18, paddingVertical: 8, paddingHorizontal: 11, marginBottom: 2 }, roleChipSelected: { backgroundColor: COLORS.navy, borderColor: COLORS.navy }, roleChipText: { color: '#546a78', fontSize: 11, fontWeight: '700' }, roleChipTextSelected: { color: COLORS.white }, choiceWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }, note: { color: COLORS.muted, fontSize: 11, lineHeight: 16, marginBottom: 10 }, serverUrl: { color: COLORS.blue, fontSize: 12, fontWeight: '700' }, divider: { height: 1, backgroundColor: COLORS.line, marginTop: 14, marginBottom: 12 }, banner: { borderRadius: 9, padding: 11, marginBottom: 12, borderWidth: 1 }, bannerError: { backgroundColor: '#fff0f0', borderColor: '#f0b6b8' }, bannerSuccess: { backgroundColor: '#edfaf2', borderColor: '#b7e3c7' }, bannerText: { color: COLORS.ink, fontSize: 12, lineHeight: 18 }, adminRow: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#edf1f4', paddingVertical: 11, gap: 6 }, adminRowBody: { flex: 1 }, smallAction: { paddingHorizontal: 8, paddingVertical: 7, backgroundColor: COLORS.pale, borderRadius: 7 }, smallActionText: { color: COLORS.blue, fontSize: 10, fontWeight: '800' }, smallDanger: { paddingHorizontal: 8, paddingVertical: 7, backgroundColor: '#fff0f0', borderRadius: 7 }, smallDangerText: { color: COLORS.red, fontSize: 10, fontWeight: '800' }, inlineForm: { backgroundColor: '#f6f9fb', borderRadius: 10, padding: 12, marginTop: 10 },
+  field: { marginBottom: 13 }, fieldLabel: { color: COLORS.ink, fontSize: 12, fontWeight: '800', marginBottom: 6 }, input: { minHeight: 47, borderColor: '#cfdae2', borderWidth: 1, borderRadius: 9, color: COLORS.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, backgroundColor: '#fff', textAlignVertical: 'top' }, button: { minHeight: 46, borderRadius: 9, backgroundColor: COLORS.blue, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 11, marginTop: 10 }, dangerButton: { backgroundColor: COLORS.red }, successButton: { backgroundColor: COLORS.green }, quietButton: { backgroundColor: '#eef5f8', borderWidth: 1, borderColor: '#d7e5ec' }, buttonText: { color: COLORS.white, fontSize: 13, fontWeight: '800', textAlign: 'center' }, quietButtonText: { color: COLORS.blue }, buttonDisabled: { opacity: 0.55 }, buttonPressed: { opacity: 0.82 }, roleWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 14 }, roleChip: { backgroundColor: '#f4f7f9', borderWidth: 1, borderColor: COLORS.line, borderRadius: 18, paddingVertical: 8, paddingHorizontal: 11, marginBottom: 2 }, roleChipSelected: { backgroundColor: COLORS.navy, borderColor: COLORS.navy }, roleChipText: { color: '#546a78', fontSize: 11, fontWeight: '700' }, roleChipTextSelected: { color: COLORS.white }, choiceWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }, note: { color: COLORS.muted, fontSize: 11, lineHeight: 16, marginBottom: 10 }, serverUrl: { color: COLORS.blue, fontSize: 12, fontWeight: '700' }, divider: { height: 1, backgroundColor: COLORS.line, marginTop: 14, marginBottom: 12 }, banner: { borderRadius: 9, padding: 11, marginBottom: 12, borderWidth: 1 }, bannerError: { backgroundColor: '#fff0f0', borderColor: '#f0b6b8' }, bannerWarning: { backgroundColor: '#fef3c7', borderColor: '#fde68a' }, bannerSuccess: { backgroundColor: '#edfaf2', borderColor: '#b7e3c7' }, bannerText: { color: COLORS.ink, fontSize: 12, lineHeight: 18 }, adminRow: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#edf1f4', paddingVertical: 11, gap: 6 }, adminRowBody: { flex: 1 }, smallAction: { paddingHorizontal: 8, paddingVertical: 7, backgroundColor: COLORS.pale, borderRadius: 7 }, smallActionText: { color: COLORS.blue, fontSize: 10, fontWeight: '800' }, smallDanger: { paddingHorizontal: 8, paddingVertical: 7, backgroundColor: '#fff0f0', borderRadius: 7 }, smallDangerText: { color: COLORS.red, fontSize: 10, fontWeight: '800' }, inlineForm: { backgroundColor: '#f6f9fb', borderRadius: 10, padding: 12, marginTop: 10 },
 });

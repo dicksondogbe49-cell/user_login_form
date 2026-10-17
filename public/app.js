@@ -204,6 +204,7 @@ function showTwoFactorVerify() {
       <div class="panel-label"><span>${isRegistration ? 'Verify your email' : 'Two-step verification'}</span><span class="step-number">02 / 03</span></div>
       <h2 id="panel-title">${isRegistration ? 'Confirm registration' : 'Enter your code'}</h2>
       <p class="panel-lede">A six-digit code was sent to <strong>${verificationEmail}</strong>. Please check your inbox (and spam folder). It expires in five minutes.</p>
+      ${currentUser?.emailNotice ? `<div class="security-note" style="display:block;margin-bottom:1rem;color:#b45309;background:#fef3c7;border:1px solid #fde68a;padding:0.75rem 1rem;border-radius:6px;font-size:0.875rem;"><strong>Notice:</strong> ${escapeHtml(currentUser.emailNotice)}</div>` : ''}
       <form id="totp-form">
         <div class="error-message hidden" data-error role="alert"></div>
         <div class="field"><label for="code">Email verification code</label><input class="code-input" id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required autofocus></div>
@@ -227,8 +228,14 @@ async function resendEmailCode(event) {
   status.classList.add('hidden');
   try {
     const result = await api('/api/2fa/resend', { method: 'POST' });
-    status.textContent = `A new code was sent to ${result.verificationEmail || currentUser?.username || 'your email inbox'}.`;
-    status.classList.remove('hidden');
+    if (result.emailNotice) {
+      if (currentUser) currentUser.emailNotice = result.emailNotice;
+      status.textContent = result.emailNotice;
+      status.classList.remove('hidden');
+    } else {
+      status.textContent = `A new code was sent to ${result.verificationEmail || currentUser?.username || 'your email inbox'}.`;
+      status.classList.remove('hidden');
+    }
   } catch (error) {
     setError(error.message);
   } finally {
@@ -278,7 +285,7 @@ function showForgotPassword() {
 }
 
 // Step 2 – Enter 6-digit code
-function showForgotPasswordVerify(email) {
+function showForgotPasswordVerify(email, emailNotice = null) {
   const safeEmail = escapeHtml(email || 'your email inbox');
   app.innerHTML = `<div class="auth-layout">
     ${intro('Account / Password Reset', 'Check your email.', `A 6-digit reset code has been sent to ${safeEmail}. Enter it below to verify your identity.`)}
@@ -286,6 +293,7 @@ function showForgotPasswordVerify(email) {
       <div class="panel-label"><span>Verify identity</span><span class="step-number">02 / 03</span></div>
       <h2 id="panel-title">Enter your reset code</h2>
       <p class="panel-lede">A six-digit code was sent to <strong>${safeEmail}</strong>. Please check your inbox (and spam folder). It expires in 5 minutes.</p>
+      ${emailNotice ? `<div class="security-note" style="display:block;margin-bottom:1rem;color:#b45309;background:#fef3c7;border:1px solid #fde68a;padding:0.75rem 1rem;border-radius:6px;font-size:0.875rem;"><strong>Notice:</strong> ${escapeHtml(emailNotice)}</div>` : ''}
       <form id="forgot-verify-form">
         <div class="error-message hidden" data-error role="alert"></div>
         <div class="field">
@@ -343,9 +351,9 @@ async function submitForgotPassword(event) {
   clearError();
   try {
     const email = document.querySelector('#forgot-email').value.trim();
-    await api('/api/forgot-password', { method: 'POST', body: { email } });
+    const result = await api('/api/forgot-password', { method: 'POST', body: { email } });
     // Always proceed to code entry — server never reveals if email exists
-    showForgotPasswordVerify(email);
+    showForgotPasswordVerify(email, result.emailNotice);
   } catch (error) {
     setError(error.message);
     button.disabled = false;
@@ -372,11 +380,11 @@ async function resendResetCode(event) {
   button.disabled = true;
   clearError();
   try {
-    await api('/api/forgot-password/resend', { method: 'POST' });
+    const result = await api('/api/forgot-password/resend', { method: 'POST' });
     const status = document.createElement('p');
     status.className = 'security-note';
     status.setAttribute('role', 'status');
-    status.textContent = `A new code has been sent to ${escapeHtml(window._resetEmail || 'your email')}.`;
+    status.textContent = result?.emailNotice || `A new code has been sent to ${escapeHtml(window._resetEmail || 'your email')}.`;
     const existingNote = document.querySelector('.security-note');
     if (existingNote) existingNote.replaceWith(status);
     else document.querySelector('.panel').appendChild(status);

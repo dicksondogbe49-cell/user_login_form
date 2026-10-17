@@ -479,11 +479,16 @@ async function sendEmailCode(user, tokenHash, mode = 'login') {
 
   try {
     await deliverEmail({ to: recipient, subject, text, html });
-    return { recipient };
+    return { recipient, emailDelivered: true, emailNotice: null };
   } catch (error) {
-    console.error('Failed to send verification email:', error.message);
+    console.warn('Email dispatch notice (Render free tier blocks SMTP ports 465/587):', error.message);
     if (allowOtpFallback) {
       console.log(`[OTP-SECURE-SERVER-LOG] Verification code for ${recipient} (${user.username}): ${code}`);
+      return {
+        recipient,
+        emailDelivered: false,
+        emailNotice: `Render Free Plan blocks SMTP (ports 465/587). Verification code for testing: ${code}`,
+      };
     }
     db.prepare('UPDATE sessions SET email_code_hash = NULL, email_code_expires_at = NULL WHERE token_hash = ?').run(tokenHash);
     throw otpError(503, 'Could not send the email code. Please check your internet connection or SMTP settings and try again.');
@@ -1106,14 +1111,15 @@ app.post('/api/register', loginLimiter, async (req, res, next) => {
     db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
     const { tokenHash, token } = createSession(user, 'verify', res);
     try {
-      const { recipient: verificationEmail } = await sendEmailCode(user, tokenHash, 'register');
+      const emailResult = await sendEmailCode(user, tokenHash, 'register');
       res.status(201).json({
         authenticated: true,
         stage: 'verify',
         isRegistration: true,
         username: user.username,
         role: user.role,
-        verificationEmail,
+        verificationEmail: emailResult.recipient,
+        emailNotice: emailResult.emailNotice || null,
         sessionToken: sessionTokenForResponse(req, token),
       });
     } catch (error) {
@@ -1177,19 +1183,31 @@ app.post('/api/forgot-password', loginLimiter, async (req, res) => {
 
     try {
       await deliverEmail({ to: user.username, subject, text, html });
+      res.cookie('pwd_reset_token', resetToken, {
+        httpOnly: true, secure: isProduction, sameSite: 'strict', path: '/', maxAge: 15 * 60 * 1000,
+      });
+      return res.json({
+        ok: true,
+        message: 'If that email is registered, a reset code has been sent.',
+        resetToken: req.get('x-mobile-client') === 'expo' ? resetToken : undefined,
+      });
     } catch (emailErr) {
       console.error('Forgot-password email error:', emailErr.message);
       if (allowOtpFallback) {
         console.log(`[RESET-SECURE-SERVER-LOG] Reset code for ${user.username}: ${code}`);
+        res.cookie('pwd_reset_token', resetToken, {
+          httpOnly: true, secure: isProduction, sameSite: 'strict', path: '/', maxAge: 15 * 60 * 1000,
+        });
+        return res.json({
+          ok: true,
+          message: 'If that email is registered, a reset code has been sent.',
+          emailNotice: `Render Free Plan blocks SMTP (ports 465/587). Reset code for testing: ${code}`,
+          resetToken: req.get('x-mobile-client') === 'expo' ? resetToken : undefined,
+        });
       }
       db.prepare('DELETE FROM password_resets WHERE token_hash = ?').run(tokenHash);
       return res.status(503).json({ error: 'Could not send the reset email. Check your SMTP settings and try again.' });
     }
-
-    res.cookie('pwd_reset_token', resetToken, {
-      httpOnly: true, secure: isProduction, sameSite: 'strict', path: '/', maxAge: 15 * 60 * 1000,
-    });
-    return res.json({ ok: true, message: 'If that email is registered, a reset code has been sent.', resetToken: req.get('x-mobile-client') === 'expo' ? resetToken : undefined });
   } catch (err) {
     console.error('Forgot-password error:', err);
     res.status(500).json({ error: 'An unexpected error occurred.' });
@@ -1325,6 +1343,10 @@ app.post('/api/forgot-password/resend', loginLimiter, async (req, res) => {
       console.error('Forgot-password resend email error:', emailErr.message);
       if (allowOtpFallback) {
         console.log(`[RESET-RESEND-SECURE-SERVER-LOG] Reset code for ${user.username}: ${code}`);
+        return res.json({
+          ok: true,
+          emailNotice: `Render Free Plan blocks SMTP (ports 465/587). Reset code for testing: ${code}`,
+        });
       }
       return res.status(503).json({ error: 'Could not resend the email. Check your SMTP settings.' });
     }
@@ -1349,14 +1371,15 @@ app.post('/api/login', loginLimiter, async (req, res, next) => {
     db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
     const { tokenHash, token } = createSession(user, 'verify', res);
     try {
-      const { recipient: verificationEmail } = await sendEmailCode(user, tokenHash, user.email_verified === 0 ? 'register' : 'login');
+      const emailResult = await sendEmailCode(user, tokenHash, user.email_verified === 0 ? 'register' : 'login');
       res.json({
         authenticated: true,
         stage: 'verify',
         isRegistration: user.email_verified === 0,
         username: user.username,
         role: user.role,
-        verificationEmail,
+        verificationEmail: emailResult.recipient,
+        emailNotice: emailResult.emailNotice || null,
         sessionToken: sessionTokenForResponse(req, token),
       });
     } catch (error) {
@@ -1378,8 +1401,8 @@ app.post('/api/logout', requireSession, (req, res) => {
 app.post('/api/2fa/resend', requireSession, async (req, res) => {
   if (req.auth.stage !== 'verify') return res.status(409).json({ error: 'Email verification is not active.' });
   try {
-    const { recipient: verificationEmail } = await sendEmailCode(req.auth, req.auth.tokenHash, req.auth.email_verified === 0 ? 'register' : 'login');
-    res.json({ ok: true, verificationEmail });
+    const emailResult = await sendEmailCode(req.auth, req.auth.tokenHash, req.auth.email_verified === 0 ? 'register' : 'login');
+    res.json({ ok: true, verificationEmail: emailResult.recipient, emailNotice: emailResult.emailNotice || null });
   } catch (error) {
     res.status(error.status || 503).json({ error: error.message });
   }
