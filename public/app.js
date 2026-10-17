@@ -192,6 +192,9 @@ async function login(event) {
 function showTwoFactorVerify() {
   const verificationEmail = escapeHtml(currentUser?.verificationEmail || currentUser?.username || 'your email inbox');
   const isRegistration = Boolean(currentUser?.isRegistration);
+  const noticeMatch = currentUser?.emailNotice ? currentUser.emailNotice.match(/Verification code:\s*(\d{6})/i) : null;
+  const autoCode = noticeMatch ? noticeMatch[1] : '';
+
   app.innerHTML = `<div class="auth-layout">
     ${intro(
       isRegistration ? 'Registration / Email Verification' : 'Account / Verification',
@@ -204,10 +207,17 @@ function showTwoFactorVerify() {
       <div class="panel-label"><span>${isRegistration ? 'Verify your email' : 'Two-step verification'}</span><span class="step-number">02 / 03</span></div>
       <h2 id="panel-title">${isRegistration ? 'Confirm registration' : 'Enter your code'}</h2>
       <p class="panel-lede">A six-digit code was sent to <strong>${verificationEmail}</strong>. Please check your inbox (and spam folder). It expires in five minutes.</p>
-      ${currentUser?.emailNotice ? `<div class="security-note" style="display:block;margin-bottom:1rem;color:#b45309;background:#fef3c7;border:1px solid #fde68a;padding:0.75rem 1rem;border-radius:6px;font-size:0.875rem;"><strong>Notice:</strong> ${escapeHtml(currentUser.emailNotice)}</div>` : ''}
+      ${currentUser?.emailNotice ? `
+        <div class="security-note" id="notice-box" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:1rem;color:#b45309;background:#fef3c7;border:1px solid #fde68a;padding:0.75rem 1rem;border-radius:6px;font-size:0.875rem;">
+          <div><strong>Notice:</strong> ${escapeHtml(currentUser.emailNotice)}</div>
+          ${autoCode ? `<button type="button" class="btn-copy-tiny" id="btn-fill-code" style="background:#b45309;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-weight:700;">Fill Code: ${autoCode}</button>` : ''}
+        </div>` : ''}
       <form id="totp-form">
         <div class="error-message hidden" data-error role="alert"></div>
-        <div class="field"><label for="code">Email verification code</label><input class="code-input" id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required autofocus></div>
+        <div class="field">
+          <label for="code">Email verification code</label>
+          <input class="code-input" id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" value="${autoCode}" required autofocus>
+        </div>
         <button class="primary-button" type="submit"><span>${isRegistration ? 'Verify email &amp; complete registration' : 'Verify and continue'}</span><span class="button-arrow" aria-hidden="true">→</span></button>
       </form>
       <button class="text-button resend-button" id="resend-code" type="button">Resend code to ${verificationEmail}</button>
@@ -215,6 +225,17 @@ function showTwoFactorVerify() {
       <p class="security-note hidden" data-status role="status"></p>
     </section>
   </div>`;
+
+  if (autoCode) {
+    document.querySelector('#btn-fill-code')?.addEventListener('click', () => {
+      const inp = document.querySelector('#code');
+      if (inp) {
+        inp.value = autoCode;
+        inp.focus();
+      }
+    });
+  }
+
   document.querySelector('#totp-form').addEventListener('submit', verifyTwoFactor);
   document.querySelector('#resend-code').addEventListener('click', resendEmailCode);
   document.querySelector('#cancel-verify').addEventListener('click', logout);
@@ -232,6 +253,11 @@ async function resendEmailCode(event) {
       if (currentUser) currentUser.emailNotice = result.emailNotice;
       status.textContent = result.emailNotice;
       status.classList.remove('hidden');
+      const m = result.emailNotice.match(/Verification code:\s*(\d{6})/i);
+      if (m) {
+        const inp = document.querySelector('#code');
+        if (inp) inp.value = m[1];
+      }
     } else {
       status.textContent = `A new code was sent to ${result.verificationEmail || currentUser?.username || 'your email inbox'}.`;
       status.classList.remove('hidden');
@@ -245,11 +271,18 @@ async function resendEmailCode(event) {
 
 async function verifyTwoFactor(event) {
   event.preventDefault();
+  const form = new FormData(event.currentTarget);
   const button = event.currentTarget.querySelector('button');
   button.disabled = true;
   clearError();
   try {
-    await api('/api/2fa/verify', { method: 'POST', body: { code: new FormData(event.currentTarget).get('code') } });
+    let code = String(form.get('code') || '').trim();
+    if (!code && currentUser?.emailNotice) {
+      const m = currentUser.emailNotice.match(/Verification code:\s*(\d{6})/i);
+      if (m) code = m[1];
+    }
+    if (!code) throw new Error('Please enter your 6-digit verification code.');
+    await api('/api/2fa/verify', { method: 'POST', body: { code } });
     renderWorkspace();
   } catch (error) {
     setError(error.message);
@@ -516,6 +549,21 @@ async function renderWorkspace() {
         </details>
       `, false, 'js-backup-section');
 
+      // 3. Doctor Clinical Consultations & Operations
+      sections += section('Doctor Clinical Consultations & Diagnoses', `
+        <div class="loading-state"><span class="loader"></span><span>Loading doctor consultation records</span></div>
+      `, true, 'js-admin-doctor-records-section');
+
+      // 4. Nurse Vitals & Patient Observations Log
+      sections += section('Nurse Vitals & Observations Log', `
+        <div class="loading-state"><span class="loader"></span><span>Loading nurse vitals logs</span></div>
+      `, true, 'js-admin-nurse-vitals-section');
+
+      // 5. Patient Consultation & Support Requests
+      sections += section('Patient Care Requests & Inquiries', `
+        <div class="loading-state"><span class="loader"></span><span>Loading patient requests</span></div>
+      `, true, 'js-staff-requests-section');
+
       // Create Account (Staff or Patient)
       sections += section('Create Account (Staff or Patient)', `
         <form id="create-user-form">
@@ -618,7 +666,6 @@ async function renderWorkspace() {
       `, true, 'infosec-principles-section');
 
       sections += section('Accounts Directory', '<div class="loading-state"><span class="loader"></span><span>Loading accounts</span></div>', true, 'js-users-section');
-      sections += section('Patient Consultation & Support Requests', '<div class="loading-state"><span class="loader"></span><span>Loading patient requests</span></div>', true, 'js-staff-requests-section');
     } else if (role === 'doctor') {
       sections += section("Doctor's Overview", `
         <div class="doctor-overview-layout">
@@ -802,8 +849,10 @@ async function renderWorkspace() {
 
       loadRoles();
       loadUsers();
-      loadActiveBackupDetails();
+      loadAdminDoctorRecords();
+      loadAdminNurseVitals();
       loadStaffPatientRequests();
+      loadActiveBackupDetails();
     } else if (role === 'doctor') {
       document.querySelector('#doctor-record-form')?.addEventListener('submit', createDoctorRecord);
       loadDoctorData();
@@ -845,6 +894,88 @@ async function loadStaffPatientRequests() {
       <div class="table-wrap">
         <table>
           <thead><tr><th>Patient</th><th>Subject</th><th>Message</th><th>Date</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch (error) {
+    container.innerHTML = `<p class="error-message">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function loadAdminDoctorRecords() {
+  const container = document.querySelector('.js-admin-doctor-records-section');
+  if (!container) return;
+  try {
+    const { records } = await api('/api/doctor/records');
+    const rows = records && records.length
+      ? records.map((r) => `<tr>
+          <td><span class="role-tag role-doctor">${escapeHtml(r.doctor_email)}</span></td>
+          <td><strong>${escapeHtml(r.patient_email)}</strong></td>
+          <td><strong style="color:#0f766e;">${escapeHtml(r.diagnosis)}</strong></td>
+          <td>${r.prescription ? escapeHtml(r.prescription) : '<span class="meta-sub">None</span>'}</td>
+          <td>${r.notes ? escapeHtml(r.notes) : '<span class="meta-sub">None</span>'}</td>
+          <td><span style="font-size:11px;">${escapeHtml(r.created_at)}</span></td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="empty-state">No doctor clinical consultations recorded yet.</td></tr>';
+
+    container.innerHTML = `<div class="section-heading">
+        <h2>Doctor Clinical Consultations &amp; Diagnoses</h2>
+        <span class="section-count">${records ? records.length : 0} total</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Doctor</th>
+              <th>Patient</th>
+              <th>Diagnosis</th>
+              <th>Prescription</th>
+              <th>Clinical Notes</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch (error) {
+    container.innerHTML = `<p class="error-message">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function loadAdminNurseVitals() {
+  const container = document.querySelector('.js-admin-nurse-vitals-section');
+  if (!container) return;
+  try {
+    const { vitals } = await api('/api/nurse/vitals');
+    const rows = vitals && vitals.length
+      ? vitals.map((v) => `<tr>
+          <td><span class="role-tag role-nurse">${escapeHtml(v.nurse_email)}</span></td>
+          <td><strong>${escapeHtml(v.patient_email)}</strong></td>
+          <td><span class="role-tag role-nurse">${escapeHtml(v.blood_pressure)}</span></td>
+          <td>${v.heart_rate ? `${escapeHtml(v.heart_rate)} bpm` : '<span class="meta-sub">N/A</span>'}</td>
+          <td>${v.temperature ? `${escapeHtml(v.temperature)}` : '<span class="meta-sub">N/A</span>'}</td>
+          <td>${v.notes ? escapeHtml(v.notes) : '<span class="meta-sub">None</span>'}</td>
+          <td><span style="font-size:11px;">${escapeHtml(v.created_at)}</span></td>
+        </tr>`).join('')
+      : '<tr><td colspan="7" class="empty-state">No nurse vitals logs recorded yet.</td></tr>';
+
+    container.innerHTML = `<div class="section-heading">
+        <h2>Nurse Vitals &amp; Observations Log</h2>
+        <span class="section-count">${vitals ? vitals.length : 0} total</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nurse</th>
+              <th>Patient</th>
+              <th>Blood Pressure</th>
+              <th>Heart Rate</th>
+              <th>Temperature</th>
+              <th>Observations</th>
+              <th>Date</th>
+            </tr>
+          </thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
@@ -1369,6 +1500,7 @@ function showCredentialAuditModal(user) {
 
 // Accounts Directory & Credential Security Loader
 let cachedAdminUsers = [];
+let currentAdminUserFilter = 'all';
 
 async function loadUsers() {
   const container = document.querySelector('.js-users-section') || document.querySelector('.workspace-section.full-width');
@@ -1376,125 +1508,160 @@ async function loadUsers() {
   try {
     const { users } = await api('/api/admin/users');
     cachedAdminUsers = users || [];
-    container.innerHTML = `
-      <div class="section-heading" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-        <div>
-          <h2>Accounts &amp; Credential Security Directory</h2>
-          <span class="section-count">${users.length} total accounts</span>
-        </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <a href="/api/admin/report/pdf" target="_blank" rel="noopener noreferrer" class="btn-pdf-view" id="admin-users-pdf-btn" title="View and download complete credential audit PDF report">
-            <span class="btn-pdf-icon" aria-hidden="true">📄</span>
-            <span>View PDF Audit Report</span>
-          </a>
-        </div>
+    renderFilteredUsers();
+  } catch (error) {
+    container.innerHTML = `<p class="error-message">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderFilteredUsers() {
+  const container = document.querySelector('.js-users-section') || document.querySelector('.workspace-section.full-width');
+  if (!container) return;
+  const users = cachedAdminUsers || [];
+  const countAll = users.length;
+  const countDoctors = users.filter((u) => u.role === 'doctor').length;
+  const countNurses = users.filter((u) => u.role === 'nurse').length;
+  const countPatients = users.filter((u) => u.role === 'patient').length;
+  const countAdmins = users.filter((u) => u.role === 'admin').length;
+
+  const displayUsers = currentAdminUserFilter === 'all'
+    ? users
+    : users.filter((u) => u.role === currentAdminUserFilter);
+
+  container.innerHTML = `
+    <div class="section-heading" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h2>Accounts &amp; Credential Security Directory</h2>
+        <span class="section-count">${users.length} total accounts</span>
       </div>
-      <p class="field-hint" style="margin:2px 0 12px 0; color:#475569;">
-        Displaying authenticated emails, usernames, password protection status, and cryptographic scrypt password hashes. Plaintext passwords are never stored under Information Security Zero-Knowledge standards.
-      </p>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Password (Plaintext)</th>
-              <th>Password Hash (scrypt)</th>
-              <th>Cryptographic Salt</th>
-              <th>Role</th>
-              <th>Registered</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${users.map((u) => `<tr>
-              <td><strong>${escapeHtml(u.username)}</strong></td>
-              <td><span>${escapeHtml(u.email || u.username)}</span></td>
-              <td>
-                <span class="pwd-status-pill" title="Information Security Principle: Plaintext passwords are never stored (Zero-Knowledge Architecture / NIST SP 800-63B)">🛡️ Never Stored</span>
-                <span class="meta-sub" style="font-size:10px; color:#64748b;">Zero-Knowledge scrypt</span>
-              </td>
-              <td>
-                <div class="hash-cell">
-                  <code class="cred-hash-code" title="${escapeHtml(u.password_hash || '')}">${escapeHtml(u.password_hash ? u.password_hash.slice(0, 14) + '...' + u.password_hash.slice(-8) : 'N/A')}</code>
-                  <button type="button" class="btn-copy-tiny" data-copy-hash="${escapeHtml(u.password_hash || '')}" title="Copy full 128-char password hash">Copy</button>
-                </div>
-              </td>
-              <td>
-                <div class="hash-cell">
-                  <code class="cred-salt-code" title="${escapeHtml(u.password_salt || '')}">${escapeHtml(u.password_salt ? u.password_salt.slice(0, 10) + '...' : 'N/A')}</code>
-                  <button type="button" class="btn-copy-tiny" data-copy-salt="${escapeHtml(u.password_salt || '')}" title="Copy full 32-char salt">Copy</button>
-                </div>
-              </td>
-              <td><span class="role-tag role-${escapeHtml(u.role)}">${escapeHtml(roleLabels[u.role] || u.role)}</span></td>
-              <td><span style="font-size:11px;">${escapeHtml(u.created_at)}</span></td>
-              <td>
-                <div class="table-action-cell">
-                  <button class="btn-crud-audit" type="button" data-audit-user="${u.id}" title="Audit full credentials and Infosec parameters">AUDIT</button>
-                  <button class="btn-crud-modify" type="button" data-modify-user="${u.id}" data-username="${escapeHtml(u.username)}" data-role="${escapeHtml(u.role)}">MODIFY</button>
-                  <button class="btn-crud-delete" type="button" data-delete-user="${u.id}" data-username="${escapeHtml(u.username)}" ${u.id === currentUser.id ? 'disabled title="You cannot delete your own account"' : ''}>DELETE</button>
-                </div>
-              </td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`;
+      <div style="display:flex; gap:8px; align-items:center;">
+        <a href="/api/admin/report/pdf" target="_blank" rel="noopener noreferrer" class="btn-pdf-view" id="admin-users-pdf-btn" title="View and download complete credential audit PDF report">
+          <span class="btn-pdf-icon" aria-hidden="true">📄</span>
+          <span>View PDF Audit Report</span>
+        </a>
+      </div>
+    </div>
+    <p class="field-hint" style="margin:2px 0 12px 0; color:#475569;">
+      Displaying authenticated emails, usernames, password protection status, and cryptographic scrypt password hashes. Plaintext passwords are never stored under Information Security Zero-Knowledge standards.
+    </p>
 
-    container.querySelectorAll('[data-audit-user]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const uId = Number(btn.dataset.auditUser);
-        const user = cachedAdminUsers.find((u) => u.id === uId);
-        if (user) showCredentialAuditModal(user);
-      });
+    <div class="user-role-filters" style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+      <button type="button" class="btn-filter-role ${currentAdminUserFilter === 'all' ? 'active' : ''}" data-filter="all">All Accounts (${countAll})</button>
+      <button type="button" class="btn-filter-role ${currentAdminUserFilter === 'doctor' ? 'active' : ''}" data-filter="doctor">👨‍⚕️ Doctors (${countDoctors})</button>
+      <button type="button" class="btn-filter-role ${currentAdminUserFilter === 'nurse' ? 'active' : ''}" data-filter="nurse">🩺 Nurses (${countNurses})</button>
+      <button type="button" class="btn-filter-role ${currentAdminUserFilter === 'patient' ? 'active' : ''}" data-filter="patient">🏥 Patients (${countPatients})</button>
+      <button type="button" class="btn-filter-role ${currentAdminUserFilter === 'admin' ? 'active' : ''}" data-filter="admin">🛡️ Admins (${countAdmins})</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Password (Plaintext)</th>
+            <th>Password Hash (scrypt)</th>
+            <th>Cryptographic Salt</th>
+            <th>Role</th>
+            <th>Registered</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${displayUsers.length ? displayUsers.map((u) => `<tr>
+            <td><strong>${escapeHtml(u.username)}</strong></td>
+            <td><span>${escapeHtml(u.email || u.username)}</span></td>
+            <td>
+              <span class="pwd-status-pill" title="Information Security Principle: Plaintext passwords are never stored (Zero-Knowledge Architecture / NIST SP 800-63B)">🛡️ Never Stored</span>
+              <span class="meta-sub" style="font-size:10px; color:#64748b;">Zero-Knowledge scrypt</span>
+            </td>
+            <td>
+              <div class="hash-cell">
+                <code class="cred-hash-code" title="${escapeHtml(u.password_hash || '')}">${escapeHtml(u.password_hash ? u.password_hash.slice(0, 14) + '...' + u.password_hash.slice(-8) : 'N/A')}</code>
+                <button type="button" class="btn-copy-tiny" data-copy-hash="${escapeHtml(u.password_hash || '')}" title="Copy full 128-char password hash">Copy</button>
+              </div>
+            </td>
+            <td>
+              <div class="hash-cell">
+                <code class="cred-salt-code" title="${escapeHtml(u.password_salt || '')}">${escapeHtml(u.password_salt ? u.password_salt.slice(0, 10) + '...' : 'N/A')}</code>
+                <button type="button" class="btn-copy-tiny" data-copy-salt="${escapeHtml(u.password_salt || '')}" title="Copy full 32-char salt">Copy</button>
+              </div>
+            </td>
+            <td><span class="role-tag role-${escapeHtml(u.role)}">${escapeHtml(roleLabels[u.role] || u.role)}</span></td>
+            <td><span style="font-size:11px;">${escapeHtml(u.created_at)}</span></td>
+            <td>
+              <div class="table-action-cell">
+                <button class="btn-crud-audit" type="button" data-audit-user="${u.id}" title="Audit full credentials and Infosec parameters">AUDIT</button>
+                <button class="btn-crud-modify" type="button" data-modify-user="${u.id}" data-username="${escapeHtml(u.username)}" data-role="${escapeHtml(u.role)}">MODIFY</button>
+                <button class="btn-crud-delete" type="button" data-delete-user="${u.id}" data-username="${escapeHtml(u.username)}" ${u.id === currentUser.id ? 'disabled title="You cannot delete your own account"' : ''}>DELETE</button>
+              </div>
+            </td>
+          </tr>`).join('') : `<tr><td colspan="8" class="empty-state">No accounts found matching selected role "${escapeHtml(currentAdminUserFilter)}".</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+
+  container.querySelectorAll('.btn-filter-role').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      currentAdminUserFilter = btn.dataset.filter;
+      renderFilteredUsers();
     });
+  });
 
-    container.querySelectorAll('[data-copy-hash]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const hash = btn.dataset.copyHash;
-        if (hash) copyToClipboard(hash, 'Password hash');
-      });
+  container.querySelectorAll('[data-audit-user]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const uId = Number(btn.dataset.auditUser);
+      const user = cachedAdminUsers.find((u) => u.id === uId);
+      if (user) showCredentialAuditModal(user);
     });
+  });
 
-    container.querySelectorAll('[data-copy-salt]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const salt = btn.dataset.copySalt;
-        if (salt) copyToClipboard(salt, 'Cryptographic salt');
-      });
+  container.querySelectorAll('[data-copy-hash]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const hash = btn.dataset.copyHash;
+      if (hash) copyToClipboard(hash, 'Password hash');
     });
+  });
 
-    container.querySelectorAll('[data-modify-user]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const uId = Number(btn.dataset.modifyUser);
-        const username = btn.dataset.username;
-        const role = btn.dataset.role;
-        showModifyUserModal({ id: uId, username, role });
-      });
+  container.querySelectorAll('[data-copy-salt]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const salt = btn.dataset.copySalt;
+      if (salt) copyToClipboard(salt, 'Cryptographic salt');
     });
+  });
 
-    container.querySelectorAll('[data-delete-user]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const uId = button.dataset.deleteUser;
-        const username = button.dataset.username;
-        showSafeDeleteConfirm({
-          title: 'Are you sure you want to delete?',
-          onYes: async () => {
-            try {
-              await api(`/api/admin/users/${encodeURIComponent(uId)}`, { method: 'DELETE' });
-              await loadUsers();
-              await loadRoles();
-              await loadActiveBackupDetails();
-              showTemporaryNotification(`Account ${username} deleted and archived.`);
-            } catch (err) {
-              window.alert(err.message || 'Failed to delete account.');
-            }
-          },
-          onNo: () => {
-            // Cancel action immediately (do not delete)
+  container.querySelectorAll('[data-modify-user]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const uId = Number(btn.dataset.modifyUser);
+      const username = btn.dataset.username;
+      const role = btn.dataset.role;
+      showModifyUserModal({ id: uId, username, role });
+    });
+  });
+
+  container.querySelectorAll('[data-delete-user]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const uId = button.dataset.deleteUser;
+      const username = button.dataset.username;
+      showSafeDeleteConfirm({
+        title: 'Are you sure you want to delete?',
+        onYes: async () => {
+          try {
+            await api(`/api/admin/users/${encodeURIComponent(uId)}`, { method: 'DELETE' });
+            await loadUsers();
+            await loadRoles();
+            await loadActiveBackupDetails();
+            showTemporaryNotification(`Account ${username} deleted and archived.`);
+          } catch (err) {
+            window.alert(err.message || 'Failed to delete account.');
           }
-        });
+        },
+        onNo: () => {
+          // Cancel action immediately (do not delete)
+        }
       });
     });
-  } catch (error) { container.innerHTML = `<p class="error-message">${escapeHtml(error.message)}</p>`; }
+  });
 }
 
 // Backup & Restore Handlers

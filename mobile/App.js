@@ -133,10 +133,23 @@ export default function App() {
       const dashboard = await api('/api/dashboard');
       const next = { dashboard };
       if (user.role === 'admin') {
-        const [users, roles, backups, requests] = await Promise.all([
-          api('/api/admin/users'), api('/api/admin/roles'), api('/api/admin/backups'), api('/api/staff/patient-requests'),
+        const [users, roles, backups, requests, doctorRecords, nurseVitals] = await Promise.all([
+          api('/api/admin/users'),
+          api('/api/admin/roles'),
+          api('/api/admin/backups'),
+          api('/api/staff/patient-requests'),
+          api('/api/doctor/records'),
+          api('/api/nurse/vitals'),
         ]);
-        Object.assign(next, { users: users.users || [], roles: roles.roles || [], archivedRoles: roles.archived_roles || [], backups, requests: requests.requests || [] });
+        Object.assign(next, {
+          users: users.users || [],
+          roles: roles.roles || [],
+          archivedRoles: roles.archived_roles || [],
+          backups,
+          requests: requests.requests || [],
+          doctorRecords: doctorRecords.records || [],
+          nurseVitals: nurseVitals.vitals || [],
+        });
       } else if (user.role === 'doctor') {
         const [patients, records, requests] = await Promise.all([api('/api/doctor/patients'), api('/api/doctor/records'), api('/api/staff/patient-requests')]);
         Object.assign(next, { patients: patients.patients || [], records: records.records || [], requests: requests.requests || [] });
@@ -207,31 +220,55 @@ export default function App() {
   };
 
   if (authStage === 'loading') return <Centered><ActivityIndicator size="large" color={COLORS.blue} /><Text style={styles.muted}>Connecting securely…</Text></Centered>;
-  if (authStage === 'verify') return <AuthLayout title="Verify your email" subtitle={`Enter the six digit code sent to ${authInfo?.verificationEmail || authInfo?.username || 'your email'}. Check your inbox.`} error={error}>
-    {authInfo?.emailNotice ? <Banner text={authInfo.emailNotice} tone="warning" /> : null}
-    <FormField label="Verification code" value={verifyCode} onChangeText={setVerifyCode} keyboardType="number-pad" placeholder="000000" maxLength={6} />
-    <Button title="Verify and continue" loading={busy} onPress={async () => {
-      setBusy(true); setError('');
-      try { await api('/api/2fa/verify', { method: 'POST', body: { code: verifyCode.trim() } }); const session = await api('/api/session'); setUser(session); setAuthStage('app'); setVerifyCode(''); }
-      catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
-    }} />
-    <Button title="Resend code" variant="quiet" onPress={async () => {
-      setBusy(true); setError('');
-      try {
-        const res = await api('/api/2fa/resend', { method: 'POST' });
-        if (res?.emailNotice) {
-          setAuthInfo((prev) => ({ ...prev, emailNotice: res.emailNotice }));
-        } else {
-          setNotice('Code resent to your email');
-        }
-      } catch (e) {
-        setError(errorMessage(e));
-      } finally {
-        setBusy(false);
-      }
-    }} />
-    <Button title="Use a different account" variant="quiet" onPress={signOut} />
-  </AuthLayout>;
+  if (authStage === 'verify') {
+    const autoCodeMatch = authInfo?.emailNotice ? authInfo.emailNotice.match(/Verification code:\s*(\d{6})/i) : null;
+    const autoCode = autoCodeMatch ? autoCodeMatch[1] : '';
+
+    return (
+      <AuthLayout title="Verify your email" subtitle={`Enter the six digit code sent to ${authInfo?.verificationEmail || authInfo?.username || 'your email'}. Check your inbox.`} error={error}>
+        {authInfo?.emailNotice ? <Banner text={authInfo.emailNotice} tone="warning" /> : null}
+        {autoCode ? (
+          <Button
+            title={`Fill Code (${autoCode})`}
+            variant="outline"
+            onPress={() => setVerifyCode(autoCode)}
+          />
+        ) : null}
+        <FormField label="Verification code" value={verifyCode || autoCode} onChangeText={setVerifyCode} keyboardType="number-pad" placeholder="000000" maxLength={6} />
+        <Button title="Verify and continue" loading={busy} onPress={async () => {
+          setBusy(true); setError('');
+          try {
+            const finalCode = (verifyCode || autoCode || '').trim();
+            if (!finalCode) throw new Error('Please enter your 6-digit verification code.');
+            await api('/api/2fa/verify', { method: 'POST', body: { code: finalCode } });
+            const session = await api('/api/session');
+            setUser(session);
+            setAuthStage('app');
+            setVerifyCode('');
+          }
+          catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
+        }} />
+        <Button title="Resend code" variant="quiet" onPress={async () => {
+          setBusy(true); setError('');
+          try {
+            const res = await api('/api/2fa/resend', { method: 'POST' });
+            if (res?.emailNotice) {
+              setAuthInfo((prev) => ({ ...prev, emailNotice: res.emailNotice }));
+              const m = res.emailNotice.match(/Verification code:\s*(\d{6})/i);
+              if (m) setVerifyCode(m[1]);
+            } else {
+              setNotice('Code resent to your email');
+            }
+          } catch (e) {
+            setError(errorMessage(e));
+          } finally {
+            setBusy(false);
+          }
+        }} />
+        <Button title="Use a different account" variant="quiet" onPress={signOut} />
+      </AuthLayout>
+    );
+  }
 
   if (authStage === 'reset') return <PasswordReset api={api} resetToken={resetToken} setResetToken={setResetToken} resetEmail={resetEmail} setResetEmail={setResetEmail} resetStep={resetStep} setResetStep={setResetStep} baseUrl={baseUrl} onBack={() => { setAuthStage('login'); setError(''); }} error={error} setError={setError} notice={notice} setNotice={setNotice} />;
 
@@ -374,7 +411,33 @@ function RecordsScreen({ user, data }) {
   if (user?.role === 'nurse') return <Card title="Vitals log" count={data.vitals?.length || 0}>{(data.vitals || []).map((item) => <RecordItem key={item.id} title={`${item.patient_email} · ${item.blood_pressure}`} subtitle={`${item.created_at} · ${item.nurse_email}`} detail={`Heart rate: ${item.heart_rate || '—'} bpm   Temperature: ${item.temperature || '—'}\n${item.notes || ''}`} />)}{!data.vitals?.length ? <Text style={styles.muted}>No vitals have been recorded.</Text> : null}</Card>;
   if (user?.role === 'patient') return <><Card title="Medical records" count={data.records?.length || 0}>{(data.records || []).map((item) => <RecordItem key={item.id} title={item.diagnosis} subtitle={`${item.doctor_email} · ${item.created_at}`} detail={`${item.prescription || 'No prescription'}${item.notes ? `\n${item.notes}` : ''}`} />)}{!data.records?.length ? <Text style={styles.muted}>No medical records yet.</Text> : null}</Card><Card title="Vitals history" count={data.vitals?.length || 0}>{(data.vitals || []).map((item) => <RecordItem key={item.id} title={`${item.blood_pressure} · ${item.heart_rate || '—'} bpm`} subtitle={`${item.created_at} · ${item.nurse_email}`} detail={`Temperature: ${item.temperature || '—'}\n${item.notes || ''}`} />)}{!data.vitals?.length ? <Text style={styles.muted}>No vitals have been recorded.</Text> : null}</Card><Card title="My care requests" count={data.requests?.length || 0}>{(data.requests || []).map((item) => <RecordItem key={item.id} title={item.subject} subtitle={item.created_at} detail={item.message} />)}{!data.requests?.length ? <Text style={styles.muted}>You have not sent a request.</Text> : null}</Card></>;
   if (user?.role === 'manager') return <Card title="Recent team entries" count={data.entries?.length || 0}>{(data.entries || []).map((item) => <RecordItem key={item.id} title={item.title} subtitle={`${item.username} · ${item.created_at}`} detail={item.notes || 'No notes'} />)}{!data.entries?.length ? <Text style={styles.muted}>No entries to review.</Text> : null}</Card>;
-  if (user?.role === 'admin') return <><Card title="Credential Audit & Account Directory" count={data.users?.length || 0}>{(data.users || []).map((item) => <RecordItem key={item.id} title={item.username} subtitle={`${LABELS[item.role] || item.role} · Created: ${item.created_at}`} detail={`Password: Protected (Never stored — Zero-Knowledge)\nHash: ${item.password_hash ? item.password_hash.slice(0, 16) + '...' : 'Protected (scrypt-64)'}\nSalt: ${item.password_salt ? item.password_salt.slice(0, 12) + '...' : 'Standard 16-byte'}\nInfosec Compliance: NIST SP 800-63B / OWASP ASVS`} />)}</Card><Card title="Active roles" count={data.roles?.length || 0}>{(data.roles || []).map((item) => <RecordItem key={item.id} title={item.display_name || item.name} subtitle={`${item.name} · ${item.user_count || 0} accounts`} detail={item.description} />)}</Card><Card title="Archived roles" count={data.archivedRoles?.length || 0}>{(data.archivedRoles || []).map((item) => <RecordItem key={item.id} title={item.display_name || item.name} subtitle={`Archived ${item.archived_at} · ${item.archived_by}`} detail={item.archive_reason || item.description} />)}{!data.archivedRoles?.length ? <Text style={styles.muted}>No archived roles.</Text> : null}</Card></>;
+  if (user?.role === 'admin') return <>
+    <Card title="Doctor Consultations & Diagnoses" count={data.doctorRecords?.length || 0}>
+      {(data.doctorRecords || []).map((item) => (
+        <RecordItem
+          key={item.id}
+          title={`Dr. ${item.doctor_email} → ${item.patient_email}`}
+          subtitle={`${item.diagnosis} · ${item.created_at}`}
+          detail={`${item.prescription ? `Rx: ${item.prescription}\n` : ''}${item.notes ? `Notes: ${item.notes}` : 'No notes'}`}
+        />
+      ))}
+      {!data.doctorRecords?.length ? <Text style={styles.muted}>No doctor clinical consultations recorded yet.</Text> : null}
+    </Card>
+    <Card title="Nurse Vitals Logs" count={data.nurseVitals?.length || 0}>
+      {(data.nurseVitals || []).map((item) => (
+        <RecordItem
+          key={item.id}
+          title={`Nurse ${item.nurse_email} → ${item.patient_email}`}
+          subtitle={`BP: ${item.blood_pressure} · Pulse: ${item.heart_rate || '—'} bpm · Temp: ${item.temperature || '—'}`}
+          detail={`${item.created_at}${item.notes ? `\nTriage Notes: ${item.notes}` : ''}`}
+        />
+      ))}
+      {!data.nurseVitals?.length ? <Text style={styles.muted}>No nurse vitals logs recorded yet.</Text> : null}
+    </Card>
+    <Card title="Credential Audit & Account Directory" count={data.users?.length || 0}>{(data.users || []).map((item) => <RecordItem key={item.id} title={item.username} subtitle={`${LABELS[item.role] || item.role} · Created: ${item.created_at}`} detail={`Password: Protected (Never stored — Zero-Knowledge)\nHash: ${item.password_hash ? item.password_hash.slice(0, 16) + '...' : 'Protected (scrypt-64)'}\nSalt: ${item.password_salt ? item.password_salt.slice(0, 12) + '...' : 'Standard 16-byte'}\nInfosec Compliance: NIST SP 800-63B / OWASP ASVS`} />)}</Card>
+    <Card title="Active roles" count={data.roles?.length || 0}>{(data.roles || []).map((item) => <RecordItem key={item.id} title={item.display_name || item.name} subtitle={`${item.name} · ${item.user_count || 0} accounts`} detail={item.description} />)}</Card>
+    <Card title="Archived roles" count={data.archivedRoles?.length || 0}>{(data.archivedRoles || []).map((item) => <RecordItem key={item.id} title={item.display_name || item.name} subtitle={`Archived ${item.archived_at} · ${item.archived_by}`} detail={item.archive_reason || item.description} />)}{!data.archivedRoles?.length ? <Text style={styles.muted}>No archived roles.</Text> : null}</Card>
+  </>;
   return <Card title="Your access"><Text style={styles.bodyText}>Submit operational entries from the Actions tab. Managers can review submitted entries.</Text></Card>;
 }
 

@@ -1213,4 +1213,41 @@ button.btn-crud-delete:hover,
   color: #064e3b;
 }
 
+/* User Role Filter Buttons */
+.user-role-filters {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 16px 0;
+  flex-wrap: wrap;
+}
+
+.btn-filter-role {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-filter-role:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.btn-filter-role.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+
 
