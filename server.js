@@ -346,8 +346,7 @@ function emailCodeDigest(tokenHash, code) {
 }
 
 const allowOtpFallback = !['0', 'false'].includes(String(process.env.ALLOW_OTP_FALLBACK || 'true').toLowerCase());
-const defaultResendKey = Buffer.from('cmVfTWhrWVhSVlZfQ2twZW9NNTlWQlNIRlRmV3BqY29rcHZ4', 'base64').toString('utf8');
-const resendApiKey = (process.env.RESEND_API_KEY || defaultResendKey).trim();
+const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
 const resendFromEmail = (process.env.RESEND_FROM_EMAIL || '').trim();
 const emailWebhookUrl = (process.env.EMAIL_WEBHOOK_URL || '').trim();
 const forceSharedOtpEmail = ['1', 'true'].includes(String(process.env.FORCE_SHARED_OTP_EMAIL || '').toLowerCase());
