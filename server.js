@@ -118,29 +118,18 @@ async function emailExcelWorkbook(content, filename) {
   if (!validateEmailAddress(backupEmail)) throw new Error('The configured backup email address is invalid.');
   const subject = `Hospital Excel backup: ${filename}`;
   const text = 'A copy of the requested hospital Excel backup is attached.';
-  if (smtpUser && smtpAppPassword) {
-    try {
-      const transporter = createMailTransporter();
-      await transporter.sendMail({
-        from: `Secure Login Backup <${smtpUser}>`,
-        to: backupEmail,
-        subject,
-        text,
-        attachments: [{ filename, content, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }],
-      });
-      return;
-    } catch (error) {
-      if (!emailWebhookUrl) throw error;
-      console.warn('SMTP Excel backup delivery failed; trying configured email relay:', error.message);
-    }
-  }
-  if (!emailWebhookUrl) throw new Error('Email delivery is not configured.');
-  await sendViaEmailWebhook({
+  const html = '<p>A copy of the requested hospital Excel backup is attached.</p>';
+  await deliverEmail({
+    fromLabel: 'Secure Hospital Backup',
     to: backupEmail,
     subject,
     text,
-    attachmentFilename: filename,
-    attachmentBase64: content.toString('base64'),
+    html,
+    attachments: [{
+      filename,
+      content,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }],
   });
 }
 
@@ -611,8 +600,8 @@ function encryptBackup(buffer) {
 }
 
 async function emailDatabaseBackup(target, filename) {
-  if (((!smtpUser || !smtpAppPassword) && !emailWebhookUrl) || !validateEmailAddress(backupEmail)) {
-    throw new Error('Email backup is not configured. Check SMTP_USER, SMTP_APP_PASSWORD, and BACKUP_EMAIL in .env.');
+  if (!validateEmailAddress(backupEmail)) {
+    throw new Error('The configured backup email address is invalid.');
   }
 
   const { size } = await fs.promises.stat(target);
@@ -621,22 +610,12 @@ async function emailDatabaseBackup(target, filename) {
   }
 
   const encryptedBackup = encryptBackup(await fs.promises.readFile(target));
-  if (emailWebhookUrl) {
-    await sendViaEmailWebhook({
-      to: backupEmail,
-      subject: 'Encrypted healthcare database backup',
-      text: 'An AES-256-GCM encrypted database backup is attached. Keep a secure copy of the app SESSION_SECRET; it is required to decrypt and restore this file.',
-      attachmentFilename: `${filename}.enc`,
-      attachmentBase64: encryptedBackup.toString('base64'),
-    });
-    return backupEmail;
-  }
-  const transporter = createMailTransporter();
-  await transporter.sendMail({
-    from: `Secure Login Backup <${smtpUser}>`,
+  await deliverEmail({
+    fromLabel: 'Secure Hospital Backup',
     to: backupEmail,
     subject: 'Encrypted healthcare database backup',
     text: 'An AES-256-GCM encrypted database backup is attached. Keep a secure copy of the app SESSION_SECRET; it is required to decrypt and restore this file.',
+    html: '<p>An AES-256-GCM encrypted database backup is attached. Keep a secure copy of the app <code>SESSION_SECRET</code>; it is required to decrypt and restore this file.</p>',
     attachments: [{
       filename: `${filename}.enc`,
       content: encryptedBackup,

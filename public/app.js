@@ -539,6 +539,7 @@ async function renderWorkspace() {
             <p class="security-note hidden" data-offline-backup-status role="status"></p>
             <div class="form-divider"></div>
             <button class="primary-button" id="system-backup-button" type="button" style="margin-bottom:12px;"><span>Email encrypted backup</span><span class="button-arrow" aria-hidden="true">✉</span></button>
+            <p class="security-note hidden" data-email-backup-status role="status"></p>
             <div class="form-divider"></div>
             <form id="cloud-backup-form">
               <div class="error-message hidden" data-cloud-backup-error role="alert"></div>
@@ -1883,26 +1884,35 @@ async function createUser(event) {
 
 async function createSystemBackup() {
   const button = document.querySelector('#system-backup-button');
-  const status = document.querySelector('[data-backup-status]');
+  const status = document.querySelector('[data-email-backup-status]') || document.querySelector('[data-backup-status]');
   const error = document.querySelector('[data-error]');
-  if (!button || !status) return;
+  if (!button) return;
 
   button.disabled = true;
   if (error) {
     error.textContent = '';
     error.classList.add('hidden');
   }
-  status.classList.add('hidden');
+  if (status) {
+    status.textContent = 'Encrypting database and sending email...';
+    status.classList.remove('hidden');
+  }
 
   try {
     const result = await api('/api/admin/backup', { method: 'POST', body: { label: 'manual' } });
-    status.textContent = `Encrypted backup emailed to ${result.backup.emailed_to}. A local recovery copy was also created.`;
-    status.classList.remove('hidden');
+    if (status) {
+      if (result.backup?.emailed_to) {
+        status.textContent = `Encrypted backup emailed to ${result.backup.emailed_to}. A local recovery copy was also created.`;
+      } else {
+        status.textContent = `Local recovery copy created. Email note: ${result.backup?.email_notice || 'Could not send email'}`;
+      }
+      status.classList.remove('hidden');
+    }
+    showTemporaryNotification(result.backup?.emailed_to ? `Backup emailed to ${result.backup.emailed_to}` : 'Backup snapshot created');
   } catch (error) {
-    const backupError = document.querySelector('[data-error]');
-    if (backupError) {
-      backupError.textContent = error.message;
-      backupError.classList.remove('hidden');
+    if (status) {
+      status.textContent = `Email backup failed: ${error.message}`;
+      status.classList.remove('hidden');
     }
   } finally {
     button.disabled = false;
