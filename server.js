@@ -1527,9 +1527,9 @@ app.post('/api/2fa/verify', requireSession, (req, res) => {
 app.get('/api/dashboard', requireComplete, (req, res) => {
   const role = req.auth.role;
   if (role === 'admin') {
-    const totalUsers = db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
-    const doctors = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'doctor'").get().count;
-    const nurses = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'nurse'").get().count;
+    const totalUsers = db.prepare('SELECT COUNT(DISTINCT username) AS count FROM users').get().count;
+    const doctors = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'doctor' AND username != ? COLLATE NOCASE").get(bootstrapAdminUsername).count;
+    const nurses = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'nurse' AND username != ? COLLATE NOCASE").get(bootstrapAdminUsername).count;
     const patients = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'patient'").get().count;
     const records = db.prepare('SELECT COUNT(*) AS count FROM medical_records').get().count;
     const vitals = db.prepare('SELECT COUNT(*) AS count FROM vitals').get().count;
@@ -2397,6 +2397,63 @@ app.get('/{*splat}', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+function seedDatabaseIfEmpty() {
+  try {
+    const nonAdminCount = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role != 'admin'").get().count;
+    if (nonAdminCount === 0) {
+      console.log('Seeding hospital database with baseline accounts and clinic records...');
+      const seedFile = path.join(__dirname, 'seed_data.json');
+      if (fs.existsSync(seedFile)) {
+        const seed = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
+
+        const insertUser = db.prepare(`
+          INSERT OR IGNORE INTO users (id, username, password_hash, password_salt, role, created_at, email_verified)
+          VALUES (@id, @username, @password_hash, @password_salt, @role, @created_at, @email_verified)
+        `);
+        const insertRole = db.prepare(`
+          INSERT OR REPLACE INTO roles (id, name, display_name, description, permissions, is_system, is_archived, created_at, updated_at)
+          VALUES (@id, @name, @display_name, @description, @permissions, @is_system, @is_archived, @created_at, @updated_at)
+        `);
+        const insertArchivedRole = db.prepare(`
+          INSERT OR REPLACE INTO archived_roles (id, original_role_id, name, display_name, description, permissions, user_count_at_archive, archived_at, archived_by, archive_reason)
+          VALUES (@id, @original_role_id, @name, @display_name, @description, @permissions, @user_count_at_archive, @archived_at, @archived_by, @archive_reason)
+        `);
+        const insertVital = db.prepare(`
+          INSERT OR REPLACE INTO vitals (id, patient_id, nurse_id, blood_pressure, heart_rate, temperature, notes, created_at)
+          VALUES (@id, @patient_id, @nurse_id, @blood_pressure, @heart_rate, @temperature, @notes, @created_at)
+        `);
+        const insertRequest = db.prepare(`
+          INSERT OR REPLACE INTO patient_requests (id, patient_id, subject, message, created_at)
+          VALUES (@id, @patient_id, @subject, @message, @created_at)
+        `);
+
+        db.transaction(() => {
+          if (Array.isArray(seed.roles)) {
+            for (const r of seed.roles) insertRole.run(r);
+          }
+          if (Array.isArray(seed.archived_roles)) {
+            for (const ar of seed.archived_roles) insertArchivedRole.run(ar);
+          }
+          if (Array.isArray(seed.users)) {
+            for (const u of seed.users) insertUser.run(u);
+          }
+          if (Array.isArray(seed.vitals)) {
+            for (const v of seed.vitals) insertVital.run(v);
+          }
+          if (Array.isArray(seed.patient_requests)) {
+            for (const pr of seed.patient_requests) insertRequest.run(pr);
+          }
+        })();
+
+        refreshRolesCache();
+        console.log('Hospital database baseline seeded successfully.');
+      }
+    }
+  } catch (err) {
+    console.warn('Database seeding notice:', err.message);
+  }
+}
+
 async function start() {
   const username = bootstrapAdminUsername;
   const existing = db.prepare("SELECT id FROM users WHERE username = ? AND role = 'admin' COLLATE NOCASE").get(username);
@@ -2412,6 +2469,8 @@ async function start() {
       .run(username, credentials.hash, credentials.salt, 'admin');
     console.log(`Created bootstrap admin account: ${username}`);
   }
+
+  seedDatabaseIfEmpty();
 
   let backupTimer = null;
   if (autoBackupMinutes > 0) {

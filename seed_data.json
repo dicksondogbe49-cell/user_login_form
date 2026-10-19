@@ -1,0 +1,459 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "dicksondogbe49@gmail.com",
+      "password_hash": "c5b64c55a05f5d5156b42ebcd8d8351427315fe9bf78c6a023b2e4cbc03dd2d627db8119457491427b52b265af87df168f612793eb09d69861696601e6f7f40f",
+      "password_salt": "d24458d328dcbca308a42dabd35c6f16",
+      "role": "admin",
+      "created_at": "2026-10-08 03:17:23",
+      "email_verified": 1
+    },
+    {
+      "id": 4,
+      "username": "nurse49@gmail.com",
+      "password_hash": "02d1b1da4c7da0137bc712bc29529707738f0fa806195cf67eec82ce7d4d7e7954b4e0586dd7cc52449a866205eb697603a267708b6fc80395ab07e88f9e4485",
+      "password_salt": "0024c302013651d72611bca2bc35c142",
+      "role": "nurse",
+      "created_at": "2026-10-08 08:58:21",
+      "email_verified": 1
+    },
+    {
+      "id": 5,
+      "username": "patient49@gmail.com",
+      "password_hash": "833c4fdc80c7cecd6d491e75b7686ba171bea75fd6b4d9ce766654e80b1382b26bbf18a1e4df6b2d751b2f7e751b8808de9cc7430f645c2ea87b9a48a0c454d3",
+      "password_salt": "c4ccb9e88e5ca5882c1afbe3907c4e7e",
+      "role": "patient",
+      "created_at": "2026-10-08 08:58:21",
+      "email_verified": 1
+    },
+    {
+      "id": 6,
+      "username": "beatriceappiah@gmail.com",
+      "password_hash": "c8d9a166fbb5bb098d274a6b089516d44306b0d443ed050c027ade14f6f306dc57d1a3fd44605e17ebea6eac2ea4873ab3a9d54b74718e359208ad6a4508bb81",
+      "password_salt": "99543a4203a1030ffcce47bcc5cc1530",
+      "role": "doctor",
+      "created_at": "2026-10-08 23:18:00",
+      "email_verified": 1
+    },
+    {
+      "id": 9,
+      "username": "hosea45@gmail.com",
+      "password_hash": "4ea5ab54018517e27b027c549c8bfe95c3efe287d947fa0285dd26d861be108109a976749b5fd2d8d146a0de3ccccf0103213f562bd389bd390c168e252991b7",
+      "password_salt": "c8a52c74b46ad79850fc70573ff3bbbb",
+      "role": "doctor",
+      "created_at": "2026-10-09 16:03:44",
+      "email_verified": 1
+    },
+    {
+      "id": 10,
+      "username": "Bridget@gmail.com",
+      "password_hash": "e53127821867c61a33459739490daf9fe62a1858b5bb067a4603e532b53e12aebe94b7d231a4e8b72fd69d188dcbe19886a27fb97b96f8eccade9bc6c8e8b260",
+      "password_salt": "39fbf1268233b55b10b16061adc9de5e",
+      "role": "patient",
+      "created_at": "2026-10-10 15:07:08",
+      "email_verified": 1
+    },
+    {
+      "id": 12,
+      "username": "dicksonpaakwesi5@gmail.com",
+      "password_hash": "cf228e92b5da2cc737474b0338fff558193dae136e1df7b1f49c015853e66639c135110cd21dfd126aa9e03b162b81c330da1e5b851935bb115ac643c398ffa8",
+      "password_salt": "b106c5fdeb42d4a8508a484046599c6f",
+      "role": "patient",
+      "created_at": "2026-10-12 14:14:19",
+      "email_verified": 1
+    },
+    {
+      "id": 13,
+      "username": "dicksondogbe49@gmail.com",
+      "password_hash": "c5b64c55a05f5d5156b42ebcd8d8351427315fe9bf78c6a023b2e4cbc03dd2d627db8119457491427b52b265af87df168f612793eb09d69861696601e6f7f40f",
+      "password_salt": "d24458d328dcbca308a42dabd35c6f16",
+      "role": "doctor",
+      "created_at": "2026-10-19 11:55:47",
+      "email_verified": 1
+    },
+    {
+      "id": 14,
+      "username": "dicksondogbe49@gmail.com",
+      "password_hash": "c5b64c55a05f5d5156b42ebcd8d8351427315fe9bf78c6a023b2e4cbc03dd2d627db8119457491427b52b265af87df168f612793eb09d69861696601e6f7f40f",
+      "password_salt": "d24458d328dcbca308a42dabd35c6f16",
+      "role": "nurse",
+      "created_at": "2026-10-19 11:55:47",
+      "email_verified": 1
+    }
+  ],
+  "roles": [
+    {
+      "id": 1,
+      "name": "admin",
+      "display_name": "Administrator",
+      "description": "Overall system administrator with full access to accounts, roles, backups, and audit reports.",
+      "permissions": "Full System Control (Admin)",
+      "is_system": 1,
+      "is_archived": 0,
+      "created_at": "2026-10-14 20:50:50",
+      "updated_at": "2026-10-14 20:50:50"
+    },
+    {
+      "id": 2,
+      "name": "doctor",
+      "display_name": "Hospital Pharmacist",
+      "description": "Taking Care of young children between 2-15",
+      "permissions": "Clinical Staff",
+      "is_system": 1,
+      "is_archived": 0,
+      "created_at": "2026-10-14 20:50:50",
+      "updated_at": "2026-10-14 22:50:56"
+    },
+    {
+      "id": 3,
+      "name": "nurse",
+      "display_name": "Registered Nurse",
+      "description": "Records patient vitals, administers prescribed treatments and medications, and updates daily bedside chart records.",
+      "permissions": "Nursing Staff",
+      "is_system": 1,
+      "is_archived": 0,
+      "created_at": "2026-10-14 20:50:50",
+      "updated_at": "2026-10-15 12:32:39"
+    },
+    {
+      "id": 4,
+      "name": "patient",
+      "display_name": "Patient",
+      "description": "Registered hospital patient who can review medical records, vitals, and submit requests.",
+      "permissions": "Patient Portal Access",
+      "is_system": 1,
+      "is_archived": 1,
+      "created_at": "2026-10-14 20:50:50",
+      "updated_at": "2026-10-14 21:28:18"
+    },
+    {
+      "id": 5,
+      "name": "manager",
+      "display_name": "Manager",
+      "description": "Hospital department oversight and operational workflow monitoring.",
+      "permissions": "Management Oversight & Logs",
+      "is_system": 1,
+      "is_archived": 1,
+      "created_at": "2026-10-14 20:50:50",
+      "updated_at": "2026-10-14 21:28:11"
+    },
+    {
+      "id": 6,
+      "name": "imputor",
+      "display_name": "Imputor",
+      "description": "Operational data entry staff who logs hospital transaction entries.",
+      "permissions": "Operational Data Entry",
+      "is_system": 1,
+      "is_archived": 1,
+      "created_at": "2026-10-14 20:50:50",
+      "updated_at": "2026-10-14 21:28:07"
+    },
+    {
+      "id": 13,
+      "name": "radiologist_test",
+      "display_name": "Radiology Specialist",
+      "description": "Performs and analyzes MRI and CT scans",
+      "permissions": "Radiology & Diagnostic Imaging",
+      "is_system": 0,
+      "is_archived": 1,
+      "created_at": "2026-10-14 21:00:44",
+      "updated_at": "2026-10-14 21:28:20"
+    },
+    {
+      "id": 26,
+      "name": "role_mv8llfoi",
+      "display_name": "Senior Radiologist",
+      "description": "Chief medical specialist for CT/MRI and radiology imaging",
+      "permissions": "Lead Diagnostic & Clinical Imaging",
+      "is_system": 0,
+      "is_archived": 1,
+      "created_at": "2026-10-14 21:04:24",
+      "updated_at": "2026-10-14 21:04:24"
+    },
+    {
+      "id": 33,
+      "name": "role_mv8ltvko",
+      "display_name": "Senior Radiologist",
+      "description": "Chief medical specialist for CT/MRI and radiology imaging",
+      "permissions": "Lead Diagnostic & Clinical Imaging",
+      "is_system": 0,
+      "is_archived": 1,
+      "created_at": "2026-10-14 21:10:57",
+      "updated_at": "2026-10-14 21:10:58"
+    },
+    {
+      "id": 70,
+      "name": "radiologist",
+      "display_name": "Lead Radiologist",
+      "description": "Operates diagnostic imaging equipment (X-rays, CT scans, MRIs), interprets scan results, and produces formal diagnostic reports.",
+      "permissions": "Clinical Staff",
+      "is_system": 0,
+      "is_archived": 0,
+      "created_at": "2026-10-15 12:31:30",
+      "updated_at": "2026-10-15 12:31:30"
+    },
+    {
+      "id": 71,
+      "name": "pharmacist",
+      "display_name": "Hospital Pharmacist",
+      "description": "Verifies doctor prescriptions, dispenses medication safely to patients, and manages pharmacy drug inventory stock.",
+      "permissions": "Pharmacy Staff",
+      "is_system": 0,
+      "is_archived": 0,
+      "created_at": "2026-10-15 12:32:03",
+      "updated_at": "2026-10-15 12:32:03"
+    },
+    {
+      "id": 72,
+      "name": "lab_tech",
+      "display_name": "Clinical Laboratory Technician",
+      "description": "Processes blood, fluid, and tissue specimens, runs automated diagnostic equipment, and logs lab test results.",
+      "permissions": "Laboratory Staff",
+      "is_system": 0,
+      "is_archived": 1,
+      "created_at": "2026-10-15 12:33:09",
+      "updated_at": "2026-10-16 11:36:37"
+    },
+    {
+      "id": 133,
+      "name": "triage-officer",
+      "display_name": "Emergency Triage Officer",
+      "description": "Assesses incoming patient urgency, logs initial vital signs, and prioritizes emergency room care queue assignments.",
+      "permissions": "Clinical Staff",
+      "is_system": 0,
+      "is_archived": 0,
+      "created_at": "2026-10-16 12:06:53",
+      "updated_at": "2026-10-16 12:06:53"
+    },
+    {
+      "id": 134,
+      "name": "records_manager",
+      "display_name": "Health Records Administrator",
+      "description": "Manages digital patient medical histories, updates archiving systems, and ensures patient data privacy compliance.",
+      "permissions": "Administrative Staff",
+      "is_system": 0,
+      "is_archived": 0,
+      "created_at": "2026-10-16 12:07:36",
+      "updated_at": "2026-10-16 12:07:36"
+    },
+    {
+      "id": 135,
+      "name": "billing_officer",
+      "display_name": "Patient Billing Specialist",
+      "description": "Calculates consultation and procedure charges, generates official patient invoices, and submits insurance claims.",
+      "permissions": "Financial / Billing",
+      "is_system": 0,
+      "is_archived": 0,
+      "created_at": "2026-10-16 12:08:22",
+      "updated_at": "2026-10-16 12:08:22"
+    }
+  ],
+  "archived_roles": [
+    {
+      "id": 1,
+      "original_role_id": 13,
+      "name": "radiologist_test",
+      "display_name": "Senior Radiologist",
+      "description": "Chief medical specialist for CT/MRI and radiology imaging",
+      "permissions": "Lead Diagnostic & Clinical Imaging",
+      "user_count_at_archive": 0,
+      "archived_at": "2026-10-14 21:00:44",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 2,
+      "original_role_id": 26,
+      "name": "role_mv8llfoi",
+      "display_name": "Senior Radiologist",
+      "description": "Chief medical specialist for CT/MRI and radiology imaging",
+      "permissions": "Lead Diagnostic & Clinical Imaging",
+      "user_count_at_archive": 0,
+      "archived_at": "2026-10-14 21:04:24",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 3,
+      "original_role_id": 33,
+      "name": "role_mv8ltvko",
+      "display_name": "Senior Radiologist",
+      "description": "Chief medical specialist for CT/MRI and radiology imaging",
+      "permissions": "Lead Diagnostic & Clinical Imaging",
+      "user_count_at_archive": 0,
+      "archived_at": "2026-10-14 21:10:58",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 4,
+      "original_role_id": 2,
+      "name": "doctor",
+      "display_name": "Doctor",
+      "description": "Healthcare provider who diagnoses patients and prescribes medications.",
+      "permissions": "Clinical Consultations & Prescriptions",
+      "user_count_at_archive": 2,
+      "archived_at": "2026-10-14 21:28:01",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 5,
+      "original_role_id": 6,
+      "name": "imputor",
+      "display_name": "Imputor",
+      "description": "Operational data entry staff who logs hospital transaction entries.",
+      "permissions": "Operational Data Entry",
+      "user_count_at_archive": 0,
+      "archived_at": "2026-10-14 21:28:07",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 6,
+      "original_role_id": 5,
+      "name": "manager",
+      "display_name": "Manager",
+      "description": "Hospital department oversight and operational workflow monitoring.",
+      "permissions": "Management Oversight & Logs",
+      "user_count_at_archive": 0,
+      "archived_at": "2026-10-14 21:28:11",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 7,
+      "original_role_id": 3,
+      "name": "nurse",
+      "display_name": "Nurse",
+      "description": "Clinical staff who triages patients, records vital signs, and reviews requests.",
+      "permissions": "Vitals & Triage Care",
+      "user_count_at_archive": 1,
+      "archived_at": "2026-10-14 21:28:14",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 8,
+      "original_role_id": 4,
+      "name": "patient",
+      "display_name": "Patient",
+      "description": "Registered hospital patient who can review medical records, vitals, and submit requests.",
+      "permissions": "Patient Portal Access",
+      "user_count_at_archive": 3,
+      "archived_at": "2026-10-14 21:28:18",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 9,
+      "original_role_id": 13,
+      "name": "radiologist_test",
+      "display_name": "Radiology Specialist",
+      "description": "Performs and analyzes MRI and CT scans",
+      "permissions": "Radiology & Diagnostic Imaging",
+      "user_count_at_archive": 0,
+      "archived_at": "2026-10-14 21:28:20",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    },
+    {
+      "id": 10,
+      "original_role_id": 72,
+      "name": "lab_tech",
+      "display_name": "Clinical Laboratory Technician",
+      "description": "Processes blood, fluid, and tissue specimens, runs automated diagnostic equipment, and logs lab test results.",
+      "permissions": "Laboratory Staff",
+      "user_count_at_archive": 0,
+      "archived_at": "2026-10-16 11:36:37",
+      "archived_by": "dicksondogbe49@gmail.com",
+      "archive_reason": "Admin triggered deletion"
+    }
+  ],
+  "vitals": [
+    {
+      "id": 1,
+      "patient_id": 5,
+      "nurse_id": 4,
+      "blood_pressure": "124/82 mmHg",
+      "heart_rate": "74",
+      "temperature": "98.4 F",
+      "notes": "Patient resting comfortably. Normal sinus rhythm.",
+      "created_at": "2026-10-08 09:00:08"
+    },
+    {
+      "id": 2,
+      "patient_id": 5,
+      "nurse_id": 4,
+      "blood_pressure": "120",
+      "heart_rate": "72",
+      "temperature": "37.0",
+      "notes": "Patient",
+      "created_at": "2026-10-08 11:20:30"
+    },
+    {
+      "id": 3,
+      "patient_id": 5,
+      "nurse_id": 4,
+      "blood_pressure": "120",
+      "heart_rate": "72",
+      "temperature": "37.0",
+      "notes": "Patient djd",
+      "created_at": "2026-10-08 11:20:43"
+    },
+    {
+      "id": 4,
+      "patient_id": 5,
+      "nurse_id": 4,
+      "blood_pressure": "120",
+      "heart_rate": "72",
+      "temperature": "37.0",
+      "notes": "i want to b healed completely",
+      "created_at": "2026-10-08 11:21:01"
+    }
+  ],
+  "patient_requests": [
+    {
+      "id": 1,
+      "patient_id": 5,
+      "subject": "Follow-up question",
+      "message": "Can I take the medication before breakfast?",
+      "created_at": "2026-10-08 09:00:12"
+    },
+    {
+      "id": 2,
+      "patient_id": 12,
+      "subject": "Request for General Medical Consultation",
+      "message": "Good day, I would like to schedule a general health check-up and routine consultation with an available medical officer at your earliest convenience. Please let me know available time slots.",
+      "created_at": "2026-10-15 14:31:24"
+    },
+    {
+      "id": 3,
+      "patient_id": 12,
+      "subject": "Post-Treatment Follow-up Appointment",
+      "message": "Hello care team, I am following up on my previous clinical visit from last week. I would like to schedule a follow-up consultation to review my progress and discuss the next steps in my treatment plan.",
+      "created_at": "2026-10-15 14:32:45"
+    },
+    {
+      "id": 4,
+      "patient_id": 12,
+      "subject": "Prescription Clarification & Pharmacy Support",
+      "message": "Hi, I need assistance regarding my prescribed medication regimen. Could a pharmacist or care team member contact me to clarify dosage instructions and check refill availability?",
+      "created_at": "2026-10-15 14:33:23"
+    }
+  ],
+  "entries": [],
+  "medical_records": [],
+  "login_audit_trail": [
+    {
+      "id": 1,
+      "username": "dicksondogbe49@gmail.com",
+      "role": "admin",
+      "status": "SUCCESS",
+      "ip_address": "127.0.0.1",
+      "user_agent": "NodeTestClient",
+      "created_at": "2026-10-19 11:55:47"
+    }
+  ]
+}
