@@ -210,24 +210,31 @@ for (const r of initialRoles) {
   insertRoleStmt.run(r);
 }
 
-// Auto-migrate users table if it exists and still has restrictive check constraint
+// Auto-migrate users table if it exists and has username-only unique constraint or restrictive check constraint
 const usersTableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || '';
-if (usersTableSql && usersTableSql.includes('CHECK (role IN')) {
+const hasUsernameOnlyUnique = usersTableSql && (
+  usersTableSql.includes('CHECK (role IN') ||
+  /username\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(usersTableSql) ||
+  !usersTableSql.includes('UNIQUE(username, role)')
+);
+
+if (hasUsernameOnlyUnique) {
   db.pragma('foreign_keys = OFF');
   db.exec(`
-    CREATE TABLE IF NOT EXISTS users_flexible (
+    CREATE TABLE IF NOT EXISTS users_multirole (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      username TEXT NOT NULL COLLATE NOCASE,
       password_hash TEXT NOT NULL,
       password_salt TEXT NOT NULL,
       role TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      email_verified INTEGER NOT NULL DEFAULT 1
+      email_verified INTEGER NOT NULL DEFAULT 1,
+      UNIQUE(username, role)
     );
-    INSERT OR IGNORE INTO users_flexible (id, username, password_hash, password_salt, role, created_at, email_verified)
+    INSERT OR IGNORE INTO users_multirole (id, username, password_hash, password_salt, role, created_at, email_verified)
     SELECT id, username, password_hash, password_salt, role, created_at, COALESCE(email_verified, 1) FROM users;
-    DROP TABLE users;
-    ALTER TABLE users_flexible RENAME TO users;
+    DROP TABLE IF EXISTS users;
+    ALTER TABLE users_multirole RENAME TO users;
   `);
   db.pragma('foreign_keys = ON');
 }
@@ -235,13 +242,24 @@ if (usersTableSql && usersTableSql.includes('CHECK (role IN')) {
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    username TEXT NOT NULL COLLATE NOCASE,
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
     role TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    email_verified INTEGER NOT NULL DEFAULT 1
+    email_verified INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(username, role)
   );
+  CREATE TABLE IF NOT EXISTS login_audit_trail (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'unknown',
+    status TEXT NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_login_audit_trail_created_at ON login_audit_trail(created_at DESC);
   CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -332,6 +350,26 @@ function validateEmailAddress(email) {
 
 function emailCodeDigest(tokenHash, code) {
   return crypto.createHmac('sha256', sessionSecret).update(`${tokenHash}:${code}`).digest();
+}
+
+function recordLoginAudit({ username, role, status, req }) {
+  try {
+    const rawIp = req?.headers?.['x-forwarded-for']?.split(',')?.[0]?.trim() || req?.socket?.remoteAddress || req?.ip || '';
+    const ip = String(rawIp || '').replace(/^::ffff:/, '').slice(0, 80);
+    const userAgent = String(req?.headers?.['user-agent'] || '').slice(0, 250);
+    db.prepare(`
+      INSERT INTO login_audit_trail (username, role, status, ip_address, user_agent)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      String(username || 'unknown').trim(),
+      String(role || 'unknown').toLowerCase().trim(),
+      String(status || 'UNKNOWN'),
+      ip,
+      userAgent
+    );
+  } catch (err) {
+    console.error('Audit trail recording notice:', err.message);
+  }
 }
 
 const allowOtpFallback = !['0', 'false'].includes(String(process.env.ALLOW_OTP_FALLBACK || 'true').toLowerCase());
@@ -1387,16 +1425,21 @@ app.post('/api/login', loginLimiter, async (req, res, next) => {
     const password = typeof req.body.password === 'string' ? req.body.password : '';
     const role = typeof req.body.role === 'string' ? req.body.role.trim().toLowerCase() : '';
     if (!roles.includes(role)) {
+      recordLoginAudit({ username, role, status: 'FAILED_INVALID_ROLE', req });
       return res.status(400).json({ error: 'Please select your role before signing in.' });
     }
     const user = db.prepare('SELECT * FROM users WHERE username = ? AND role = ? COLLATE NOCASE').get(username, role);
     const valid = user ? await checkPassword(password, user.password_salt, user.password_hash) : false;
-    if (!valid) return res.status(401).json({ error: 'Username, password, or role is incorrect.' });
+    if (!valid) {
+      recordLoginAudit({ username, role, status: 'FAILED_INVALID_CREDENTIALS', req });
+      return res.status(401).json({ error: 'Username, password, or role is incorrect.' });
+    }
 
     db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
     const { tokenHash, token } = createSession(user, 'verify', res);
     try {
       const emailResult = await sendEmailCode(user, tokenHash, user.email_verified === 0 ? 'register' : 'login');
+      recordLoginAudit({ username: user.username, role: user.role, status: 'OTP_SENT_CHALLENGE', req });
       res.json({
         authenticated: true,
         stage: 'verify',
@@ -1410,6 +1453,7 @@ app.post('/api/login', loginLimiter, async (req, res, next) => {
     } catch (error) {
       db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
       res.clearCookie('login_session', { httpOnly: true, secure: isProduction, sameSite: 'strict', path: '/' });
+      recordLoginAudit({ username: user.username, role: user.role, status: 'FAILED_OTP_DISPATCH', req });
       return res.status(error.status || 503).json({ error: error.message });
     }
   } catch (error) {
@@ -1441,9 +1485,11 @@ app.post('/api/2fa/verify', requireSession, (req, res) => {
     FROM sessions WHERE token_hash = ?
   `).get(req.auth.tokenHash);
   if (!/^\d{6}$/.test(code) || !session?.email_code_hash || session.email_code_expires_at <= Date.now()) {
+    recordLoginAudit({ username: req.auth.username, role: req.auth.role, status: 'FAILED_INVALID_OTP', req });
     return res.status(400).json({ error: 'The email code is incorrect or expired.' });
   }
   if (session.email_code_attempts >= 5) {
+    recordLoginAudit({ username: req.auth.username, role: req.auth.role, status: 'FAILED_OTP_LOCKOUT', req });
     return res.status(429).json({ error: 'Too many incorrect codes. Request a new code.' });
   }
 
@@ -1456,6 +1502,7 @@ app.post('/api/2fa/verify', requireSession, (req, res) => {
       SET email_code_attempts = ?, email_code_hash = CASE WHEN ? >= 5 THEN NULL ELSE email_code_hash END
       WHERE token_hash = ?
     `).run(attempts, attempts, req.auth.tokenHash);
+    recordLoginAudit({ username: req.auth.username, role: req.auth.role, status: 'FAILED_INVALID_OTP', req });
     return res.status(attempts >= 5 ? 429 : 400).json({
       error: attempts >= 5 ? 'Too many incorrect codes. Request a new code.' : 'The email code is incorrect or expired.',
     });
@@ -1473,6 +1520,7 @@ app.post('/api/2fa/verify', requireSession, (req, res) => {
     SET stage = 'complete', email_code_hash = NULL, email_code_expires_at = NULL
     WHERE token_hash = ?
   `).run(req.auth.tokenHash);
+  recordLoginAudit({ username: req.auth.username, role: req.auth.role, status: 'SUCCESS', req });
   res.json({ ok: true });
 });
 
@@ -2030,6 +2078,24 @@ app.post('/api/admin/users', requireComplete, allowRoles('admin'), async (req, r
     if (!validateEmailAddress(username)) return res.status(400).json({ error: 'Enter a valid email address for this account.' });
     if (!validatePassword(password)) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     if (!roles.includes(role)) return res.status(400).json({ error: 'Choose a valid role.' });
+
+    const isAdminEmail = username.toLowerCase() === bootstrapAdminUsername.toLowerCase() ||
+      Boolean(db.prepare("SELECT id FROM users WHERE username = ? AND role = 'admin' COLLATE NOCASE").get(username));
+
+    const existingAccounts = db.prepare('SELECT id, role FROM users WHERE username = ? COLLATE NOCASE').all(username);
+
+    if (existingAccounts.length > 0) {
+      if (!isAdminEmail) {
+        return res.status(409).json({ error: 'Normal users cannot share an email address. Only the system administrator can have multi-role accounts under one email.' });
+      }
+      if (existingAccounts.length >= 3) {
+        return res.status(400).json({ error: 'The administrator account can have at most 3 distinct roles with this email.' });
+      }
+      if (existingAccounts.some((acc) => acc.role.toLowerCase() === role.toLowerCase())) {
+        return res.status(409).json({ error: `An account for ${username} with role "${role}" already exists.` });
+      }
+    }
+
     const credentials = await hashPassword(password);
     try {
       db.prepare('INSERT INTO users (username, password_hash, password_salt, role, email_verified) VALUES (?, ?, ?, ?, 1)')
@@ -2037,12 +2103,69 @@ app.post('/api/admin/users', requireComplete, allowRoles('admin'), async (req, r
       markDatabaseChanged(req);
       sendRegistrationConfirmationEmail({ username, role });
     } catch (error) {
-      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That username is already in use.' });
+      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That email and role combination is already registered.' });
       throw error;
     }
     res.status(201).json({ ok: true });
   } catch (error) {
     next(error);
+  }
+});
+
+app.get('/api/admin/login-audit', requireComplete, allowRoles('admin'), (_req, res) => {
+  try {
+    const logs = db.prepare(`
+      SELECT id, username, role, status, ip_address, user_agent, created_at
+      FROM login_audit_trail
+      ORDER BY id DESC LIMIT 200
+    `).all();
+    res.json({ ok: true, logs });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not fetch login audit logs.' });
+  }
+});
+
+app.get('/api/admin/available-roles', requireComplete, (req, res) => {
+  try {
+    const userEmail = req.auth.username;
+    const accounts = db.prepare('SELECT id, role, created_at FROM users WHERE username = ? COLLATE NOCASE ORDER BY role ASC').all(userEmail);
+    const isEligible = userEmail.toLowerCase() === bootstrapAdminUsername.toLowerCase() ||
+      accounts.some((a) => a.role === 'admin');
+    res.json({
+      ok: true,
+      eligible: Boolean(isEligible),
+      currentRole: req.auth.role,
+      roles: accounts.map((a) => a.role),
+      accounts,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not retrieve available roles.' });
+  }
+});
+
+app.post('/api/admin/switch-role', requireComplete, (req, res) => {
+  try {
+    const targetRole = typeof req.body?.targetRole === 'string' ? req.body.targetRole.trim().toLowerCase() : '';
+    if (!targetRole) return res.status(400).json({ error: 'Target role is required.' });
+
+    const userEmail = req.auth.username;
+    const isEligible = userEmail.toLowerCase() === bootstrapAdminUsername.toLowerCase() ||
+      Boolean(db.prepare("SELECT id FROM users WHERE username = ? AND role = 'admin' COLLATE NOCASE").get(userEmail));
+
+    if (!isEligible) {
+      return res.status(403).json({ error: 'Only the administrator is authorized to switch roles under a shared email.' });
+    }
+
+    const targetAccount = db.prepare('SELECT id, username, role FROM users WHERE username = ? AND role = ? COLLATE NOCASE').get(userEmail, targetRole);
+    if (!targetAccount) {
+      return res.status(404).json({ error: `No active account for role "${targetRole}" found for ${userEmail}. Create this role in the Admin Accounts section first.` });
+    }
+
+    db.prepare('UPDATE sessions SET user_id = ? WHERE token_hash = ?').run(targetAccount.id, req.auth.tokenHash);
+    recordLoginAudit({ username: userEmail, role: targetRole, status: 'ROLE_SWITCHED_SUCCESS', req });
+    res.json({ ok: true, role: targetRole, username: userEmail, message: `Switched active session to ${targetRole.toUpperCase()}` });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not switch role.' });
   }
 });
 
@@ -2217,6 +2340,50 @@ app.post('/api/imputor/entries', requireComplete, allowRoles('admin', 'imputor')
   res.status(201).json({ ok: true });
 });
 
+// Route aliases for entries and patient requests (ensures cross-client compatibility)
+app.get('/api/entries', requireComplete, allowRoles('admin', 'imputor', 'manager'), (_req, res) => {
+  const entries = db.prepare(`
+    SELECT entries.id, entries.title, entries.notes, entries.created_at, users.username
+    FROM entries JOIN users ON users.id = entries.created_by
+    ORDER BY entries.id DESC LIMIT 100
+  `).all();
+  res.json({ entries });
+});
+
+app.post('/api/entries', requireComplete, allowRoles('admin', 'imputor'), (req, res) => {
+  const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+  const notes = typeof req.body.notes === 'string' ? req.body.notes.trim() : '';
+  if (title.length < 2 || title.length > 120) return res.status(400).json({ error: 'Entry title must be 2-120 characters.' });
+  if (notes.length > 2000) return res.status(400).json({ error: 'Notes must be 2,000 characters or fewer.' });
+  db.prepare('INSERT INTO entries (title, notes, created_by) VALUES (?, ?, ?)').run(title, notes, req.auth.id);
+  markDatabaseChanged(req);
+  res.status(201).json({ ok: true });
+});
+
+app.get('/api/patient/requests', requireComplete, allowRoles('patient'), (req, res) => {
+  const requests = db.prepare(`
+    SELECT id, subject, message, created_at
+    FROM patient_requests WHERE patient_id = ? ORDER BY id DESC LIMIT 100
+  `).all(req.auth.id);
+  res.json({ requests });
+});
+
+app.post('/api/patient/requests', requireComplete, allowRoles('patient'), (req, res) => {
+  const subject = typeof req.body.subject === 'string' ? req.body.subject.trim() : '';
+  const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+  if (subject.length < 2 || subject.length > 120) {
+    return res.status(400).json({ error: 'Subject must be 2-120 characters.' });
+  }
+  if (!message || message.length > 2000) {
+    return res.status(400).json({ error: 'Message must be 1-2,000 characters.' });
+  }
+  db.prepare('INSERT INTO patient_requests (patient_id, subject, message) VALUES (?, ?, ?)')
+    .run(req.auth.id, subject, message);
+  markDatabaseChanged(req);
+  res.status(201).json({ ok: true });
+});
+
+
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'API endpoint not found.' });
 });
@@ -2232,7 +2399,7 @@ app.get('/{*splat}', (_req, res) => {
 
 async function start() {
   const username = bootstrapAdminUsername;
-  const existing = db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username);
+  const existing = db.prepare("SELECT id FROM users WHERE username = ? AND role = 'admin' COLLATE NOCASE").get(username);
   if (!existing) {
     if (!validateEmailAddress(username)) {
       throw new Error('Bootstrap admin email does not meet the account rules.');

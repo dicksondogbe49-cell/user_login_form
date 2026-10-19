@@ -472,7 +472,10 @@ async function renderWorkspace() {
   if (!currentUser) return showLogin();
   app.innerHTML = `<div class="loading-state"><span class="loader"></span><span>Opening your workspace</span></div>`;
   try {
-    const [dashboard] = await Promise.all([api('/api/dashboard')]);
+    const [dashboard, availableRolesData] = await Promise.all([
+      api('/api/dashboard'),
+      api('/api/admin/available-roles').catch(() => ({ eligible: false, roles: [] }))
+    ]);
     const role = currentUser.role;
     document.body.classList.toggle('admin-theme', role === 'admin');
     document.body.classList.toggle('doctor-theme', role === 'doctor');
@@ -564,6 +567,11 @@ async function renderWorkspace() {
       sections += section('Patient Care Requests & Inquiries', `
         <div class="loading-state"><span class="loader"></span><span>Loading patient requests</span></div>
       `, true, 'js-staff-requests-section');
+
+      // 6. Login Audit Trail & Daily Activity Log (Requirement 1)
+      sections += section('Login Audit Trail & Activity Log', `
+        <div class="loading-state"><span class="loader"></span><span>Loading login activity records</span></div>
+      `, true, 'js-admin-login-audit-section');
 
       // Create Account (Staff or Patient)
       sections += section('Create Account (Staff or Patient)', `
@@ -821,6 +829,18 @@ async function renderWorkspace() {
           <h1>${escapeHtml(dashboard.title)}</h1>
         </div>
         <div class="user-tools">
+          ${availableRolesData?.eligible && availableRolesData.roles && availableRolesData.roles.length > 1 ? `
+            <div class="role-switcher-box" title="Admin Exclusive: Switch active capability between your assigned roles">
+              <span class="switcher-hint">Role:</span>
+              <div class="role-switcher-chips">
+                ${availableRolesData.roles.map((r) => `
+                  <button type="button" class="btn-role-switch ${r === role ? 'btn-role-switch-active' : ''}" data-switch-to="${r}" title="Switch capability to ${roleLabels[r] || r}">
+                    ${roleLabels[r] || r.toUpperCase()}
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
           ${role === 'admin' ? `
             <a href="/api/admin/report/pdf" target="_blank" rel="noopener noreferrer" class="btn-pdf-view" id="admin-view-pdf-head-btn" title="Open generated hospital report in new tab">
               <span class="btn-pdf-icon" aria-hidden="true">📄</span>
@@ -839,6 +859,29 @@ async function renderWorkspace() {
 
     document.querySelector('#logout-button').addEventListener('click', logout);
 
+    // Multi-role switch button handlers
+    document.querySelectorAll('.btn-role-switch').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const target = e.currentTarget.dataset.switchTo;
+        if (!target || target === currentUser.role) return;
+        try {
+          btn.disabled = true;
+          const origText = btn.textContent;
+          btn.textContent = '...';
+          const switchRes = await api('/api/admin/switch-role', {
+            method: 'POST',
+            body: { targetRole: target },
+          });
+          currentUser.role = target;
+          showTemporaryNotification(switchRes.message || `Switched to ${target.toUpperCase()}`);
+          await renderWorkspace();
+        } catch (err) {
+          showTemporaryNotification(err.message || 'Failed to switch role', true);
+          btn.disabled = false;
+        }
+      });
+    });
+
     if (role === 'admin') {
       document.querySelector('#offline-backup-button')?.addEventListener('click', downloadOfflineBackup);
       document.querySelector('#system-backup-button')?.addEventListener('click', createSystemBackup);
@@ -854,6 +897,7 @@ async function renderWorkspace() {
       loadAdminNurseVitals();
       loadStaffPatientRequests();
       loadActiveBackupDetails();
+      loadAdminLoginAudit();
     } else if (role === 'doctor') {
       document.querySelector('#doctor-record-form')?.addEventListener('submit', createDoctorRecord);
       loadDoctorData();
@@ -980,6 +1024,73 @@ async function loadAdminNurseVitals() {
           <tbody>${rows}</tbody>
         </table>
       </div>`;
+  } catch (error) {
+    container.innerHTML = `<p class="error-message">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function loadAdminLoginAudit() {
+  const container = document.querySelector('.js-admin-login-audit-section');
+  if (!container) return;
+  try {
+    const { logs } = await api('/api/admin/login-audit');
+    const getStatusBadge = (status) => {
+      switch (status) {
+        case 'SUCCESS':
+          return '<span class="audit-badge audit-badge-success">● SUCCESS</span>';
+        case 'OTP_SENT_CHALLENGE':
+          return '<span class="audit-badge audit-badge-otp">✉ OTP CHALLENGED</span>';
+        case 'ROLE_SWITCHED_SUCCESS':
+          return '<span class="audit-badge audit-badge-switch">⇄ ROLE SWITCHED</span>';
+        case 'FAILED_INVALID_CREDENTIALS':
+          return '<span class="audit-badge audit-badge-danger">✕ INVALID CREDENTIALS</span>';
+        case 'FAILED_INVALID_OTP':
+          return '<span class="audit-badge audit-badge-danger">✕ INVALID OTP</span>';
+        case 'FAILED_OTP_LOCKOUT':
+          return '<span class="audit-badge audit-badge-danger">⊘ OTP LOCKED OUT</span>';
+        default:
+          return `<span class="audit-badge audit-badge-warning">${escapeHtml(status)}</span>`;
+      }
+    };
+
+    const rows = logs && logs.length
+      ? logs.map((l) => `<tr>
+          <td>${getStatusBadge(l.status)}</td>
+          <td><strong>${escapeHtml(l.username)}</strong></td>
+          <td><span class="role-tag role-${l.role}">${escapeHtml(roleLabels[l.role] || l.role)}</span></td>
+          <td><code>${escapeHtml(l.ip_address || '—')}</code></td>
+          <td><span style="font-size:11px; color:#64748b;" title="${escapeHtml(l.user_agent || '')}">${escapeHtml((l.user_agent || '').slice(0, 45)) || '—'}</span></td>
+          <td><span style="font-size:11px;">${escapeHtml(l.created_at)}</span></td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="empty-state">No login activity recorded yet.</td></tr>';
+
+    container.innerHTML = `<div class="section-heading">
+        <div>
+          <h2>Login Audit Trail &amp; Daily Activity Log</h2>
+          <p class="field-hint" style="margin:2px 0 0 0; color:#475569;">Daily persistent record of all authentication attempts, OTP challenges, and role switches.</p>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button class="btn-crud-refresh" id="refresh-audit-btn" type="button" title="Refresh audit log">↻ Refresh</button>
+          <span class="section-count">${logs ? logs.length : 0} events</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Username / Email</th>
+              <th>Role</th>
+              <th>IP Address</th>
+              <th>Client / Browser</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+
+    container.querySelector('#refresh-audit-btn')?.addEventListener('click', loadAdminLoginAudit);
   } catch (error) {
     container.innerHTML = `<p class="error-message">${escapeHtml(error.message)}</p>`;
   }

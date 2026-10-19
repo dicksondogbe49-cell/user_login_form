@@ -133,13 +133,15 @@ export default function App() {
       const dashboard = await api('/api/dashboard');
       const next = { dashboard };
       if (user.role === 'admin') {
-        const [users, roles, backups, requests, doctorRecords, nurseVitals] = await Promise.all([
+        const [users, roles, backups, requests, doctorRecords, nurseVitals, loginAudit, availableRoles] = await Promise.all([
           api('/api/admin/users'),
           api('/api/admin/roles'),
           api('/api/admin/backups'),
           api('/api/staff/patient-requests'),
           api('/api/doctor/records'),
           api('/api/nurse/vitals'),
+          api('/api/admin/login-audit').catch(() => ({ logs: [] })),
+          api('/api/admin/available-roles').catch(() => ({ eligible: false, roles: [] })),
         ]);
         Object.assign(next, {
           users: users.users || [],
@@ -149,6 +151,9 @@ export default function App() {
           requests: requests.requests || [],
           doctorRecords: doctorRecords.records || [],
           nurseVitals: nurseVitals.vitals || [],
+          loginAudit: loginAudit.logs || [],
+          availableRoles: availableRoles.roles || [],
+          isMultiRoleEligible: Boolean(availableRoles.eligible),
         });
       } else if (user.role === 'doctor') {
         const [patients, records, requests] = await Promise.all([api('/api/doctor/patients'), api('/api/doctor/records'), api('/api/staff/patient-requests')]);
@@ -288,7 +293,7 @@ export default function App() {
       <Text style={styles.pageSubtitle}>{data.dashboard?.subtitle || 'Your secure hospital workspace'}</Text>
       {error ? <Banner text={error} tone="error" /> : null}
       {notice ? <Banner text={notice} tone="success" /> : null}
-      {screen === 'Home' ? <HomeScreen user={user} data={data} /> : null}
+      {screen === 'Home' ? <HomeScreen user={user} data={data} action={action} setUser={setUser} api={api} /> : null}
       {screen === 'Records' ? <RecordsScreen user={user} data={data} /> : null}
       {screen === 'Actions' ? <ActionsScreen user={user} data={data} api={api} action={action} exportWorkbook={exportWorkbook} busy={busy} /> : null}
       {screen === 'Settings' ? <SettingsScreen user={user} baseUrl={baseUrl} onSave={saveApiUrl} signOut={signOut} /> : null}
@@ -390,7 +395,7 @@ function Card({ title, count, children, style }) {
 
 function Metric({ label, value }) { return <View style={styles.metric}><Text style={styles.metricValue}>{value ?? '—'}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
 
-function HomeScreen({ user, data }) {
+function HomeScreen({ user, data, action, setUser, api }) {
   const d = data.dashboard || {};
   const metrics = user?.role === 'admin' ? [['Accounts', d.totalUsers], ['Doctors', d.doctors], ['Nurses', d.nurses], ['Patients', d.patients], ['Records', d.records], ['Vitals', d.vitals]]
     : user?.role === 'doctor' ? [['My records', d.myRecords], ['Patients', d.totalPatients], ['Care requests', d.patientRequests]]
@@ -399,6 +404,34 @@ function HomeScreen({ user, data }) {
           : [['Team entries', d.entries ?? data.entries?.length ?? 0]];
   return <><View style={styles.hero}><Text style={styles.heroKicker}>YOUR WORKSPACE</Text><Text style={styles.heroTitle}>{d.title || 'Hospital Portal'}</Text><Text style={styles.heroSubtitle}>{d.subtitle || 'Your secure hospital workspace.'}</Text></View>
     <View style={styles.metricGrid}>{metrics.map(([label, value]) => <Metric key={label} label={label} value={value} />)}</View>
+    {data.availableRoles && data.availableRoles.length > 1 ? (
+      <Card title="Admin Multi-Role Switcher">
+        <Text style={styles.note}>Switch active capability under your registered email:</Text>
+        <View style={styles.choiceWrap}>
+          {data.availableRoles.map((r) => (
+            <Pressable
+              key={r}
+              style={[styles.roleChip, user?.role === r && styles.roleChipSelected]}
+              onPress={async () => {
+                if (user?.role === r || !action) return;
+                const res = await action(`Switched to ${r.toUpperCase()}`, '/api/admin/switch-role', {
+                  method: 'POST',
+                  body: { targetRole: r },
+                });
+                if (res && setUser && api) {
+                  const session = await api('/api/session');
+                  setUser(session);
+                }
+              }}
+            >
+              <Text style={[styles.roleChipText, user?.role === r && styles.roleChipTextSelected]}>
+                {LABELS[r] || r.toUpperCase()}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </Card>
+    ) : null}
     {user?.role === 'admin' ? <Card title="System status"><Text style={styles.bodyText}>Role based access is active. Pull down to refresh the latest dashboard, account, and backup data.</Text></Card> : null}
     {user?.role === 'doctor' ? <Card title="Patient directory" count={data.patients?.length || 0}>{(data.patients || []).slice(0, 8).map((p) => <Text style={styles.listLine} key={p.id}><Text style={styles.bold}>#{p.id}</Text>  {p.username}</Text>)}</Card> : null}
     {user?.role === 'nurse' ? <Card title="Patient directory" count={data.patients?.length || 0}>{(data.patients || []).slice(0, 8).map((p) => <Text style={styles.listLine} key={p.id}><Text style={styles.bold}>#{p.id}</Text>  {p.username}</Text>)}</Card> : null}
@@ -412,6 +445,17 @@ function RecordsScreen({ user, data }) {
   if (user?.role === 'patient') return <><Card title="Medical records" count={data.records?.length || 0}>{(data.records || []).map((item) => <RecordItem key={item.id} title={item.diagnosis} subtitle={`${item.doctor_email} · ${item.created_at}`} detail={`${item.prescription || 'No prescription'}${item.notes ? `\n${item.notes}` : ''}`} />)}{!data.records?.length ? <Text style={styles.muted}>No medical records yet.</Text> : null}</Card><Card title="Vitals history" count={data.vitals?.length || 0}>{(data.vitals || []).map((item) => <RecordItem key={item.id} title={`${item.blood_pressure} · ${item.heart_rate || '—'} bpm`} subtitle={`${item.created_at} · ${item.nurse_email}`} detail={`Temperature: ${item.temperature || '—'}\n${item.notes || ''}`} />)}{!data.vitals?.length ? <Text style={styles.muted}>No vitals have been recorded.</Text> : null}</Card><Card title="My care requests" count={data.requests?.length || 0}>{(data.requests || []).map((item) => <RecordItem key={item.id} title={item.subject} subtitle={item.created_at} detail={item.message} />)}{!data.requests?.length ? <Text style={styles.muted}>You have not sent a request.</Text> : null}</Card></>;
   if (user?.role === 'manager') return <Card title="Recent team entries" count={data.entries?.length || 0}>{(data.entries || []).map((item) => <RecordItem key={item.id} title={item.title} subtitle={`${item.username} · ${item.created_at}`} detail={item.notes || 'No notes'} />)}{!data.entries?.length ? <Text style={styles.muted}>No entries to review.</Text> : null}</Card>;
   if (user?.role === 'admin') return <>
+    <Card title="Login Audit Trail & Activity Log" count={data.loginAudit?.length || 0}>
+      {(data.loginAudit || []).map((item) => (
+        <RecordItem
+          key={item.id}
+          title={`[${item.status}] ${item.username}`}
+          subtitle={`${LABELS[item.role] || item.role} · ${item.created_at}`}
+          detail={`IP: ${item.ip_address || '—'}\nClient: ${item.user_agent ? item.user_agent.slice(0, 50) : 'Mobile'}`}
+        />
+      ))}
+      {!data.loginAudit?.length ? <Text style={styles.muted}>No login activity recorded yet.</Text> : null}
+    </Card>
     <Card title="Doctor Consultations & Diagnoses" count={data.doctorRecords?.length || 0}>
       {(data.doctorRecords || []).map((item) => (
         <RecordItem
