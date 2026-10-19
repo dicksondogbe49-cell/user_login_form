@@ -2397,17 +2397,17 @@ app.get('/{*splat}', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-function seedDatabaseIfEmpty() {
+function seedDatabaseIfEmpty(force = false) {
   try {
-    const nonAdminCount = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role != 'admin'").get().count;
-    if (nonAdminCount === 0) {
+    const distinctUserCount = db.prepare('SELECT COUNT(DISTINCT username) AS count FROM users').get().count;
+    if (force || distinctUserCount < 7) {
       console.log('Seeding hospital database with baseline accounts and clinic records...');
       const seedFile = path.join(__dirname, 'seed_data.json');
       if (fs.existsSync(seedFile)) {
         const seed = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
 
         const insertUser = db.prepare(`
-          INSERT OR IGNORE INTO users (id, username, password_hash, password_salt, role, created_at, email_verified)
+          INSERT OR REPLACE INTO users (id, username, password_hash, password_salt, role, created_at, email_verified)
           VALUES (@id, @username, @password_hash, @password_salt, @role, @created_at, @email_verified)
         `);
         const insertRole = db.prepare(`
@@ -2445,6 +2445,7 @@ function seedDatabaseIfEmpty() {
           }
         })();
 
+        db.prepare("UPDATE roles SET is_archived = 0 WHERE is_system = 1 OR name IN ('admin', 'doctor', 'nurse', 'patient', 'manager', 'imputor')").run();
         refreshRolesCache();
         console.log('Hospital database baseline seeded successfully.');
       }
@@ -2453,6 +2454,12 @@ function seedDatabaseIfEmpty() {
     console.warn('Database seeding notice:', err.message);
   }
 }
+
+app.post('/api/admin/sync-baseline', requireComplete, allowRoles('admin'), (req, res) => {
+  seedDatabaseIfEmpty(true);
+  markDatabaseChanged(req);
+  res.json({ ok: true, message: 'Hospital database synchronized to baseline.' });
+});
 
 async function start() {
   const username = bootstrapAdminUsername;
