@@ -182,31 +182,37 @@ async function appendRestoreHistory(entry) {
 }
 
 // Initialize roles and archived_roles tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS roles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    display_name TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    permissions TEXT NOT NULL DEFAULT 'Standard',
-    is_system INTEGER NOT NULL DEFAULT 0,
-    is_archived INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS archived_roles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    original_role_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    permissions TEXT NOT NULL DEFAULT 'Standard',
-    user_count_at_archive INTEGER NOT NULL DEFAULT 0,
-    archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    archived_by TEXT NOT NULL DEFAULT 'admin',
-    archive_reason TEXT NOT NULL DEFAULT 'Admin user deletion'
-  );
-`);
+if (db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS roles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        display_name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        permissions TEXT NOT NULL DEFAULT 'Standard',
+        is_system INTEGER NOT NULL DEFAULT 0,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS archived_roles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        original_role_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        permissions TEXT NOT NULL DEFAULT 'Standard',
+        user_count_at_archive INTEGER NOT NULL DEFAULT 0,
+        archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        archived_by TEXT NOT NULL DEFAULT 'admin',
+        archive_reason TEXT NOT NULL DEFAULT 'Admin user deletion'
+      );
+    `);
+  } catch (err) {
+    console.warn('Roles table init warning:', err.message);
+  }
+}
 
 const initialRoles = [
   { name: 'admin', display_name: 'Administrator', description: 'Overall system administrator with full access to accounts, roles, backups, and audit reports.', permissions: 'Full System Control (Admin)', is_system: 1 },
@@ -217,141 +223,152 @@ const initialRoles = [
   { name: 'imputor', display_name: 'Imputor', description: 'Operational data entry staff who logs hospital transaction entries.', permissions: 'Operational Data Entry', is_system: 1 },
 ];
 
-const insertRoleStmt = db.prepare(`
-  INSERT OR IGNORE INTO roles (name, display_name, description, permissions, is_system)
-  VALUES (@name, @display_name, @description, @permissions, @is_system)
-`);
-for (const r of initialRoles) {
-  insertRoleStmt.run(r);
+if (db) {
+  try {
+    const insertRoleStmt = db.prepare(`
+      INSERT OR IGNORE INTO roles (name, display_name, description, permissions, is_system)
+      VALUES (@name, @display_name, @description, @permissions, @is_system)
+    `);
+    for (const r of initialRoles) {
+      insertRoleStmt.run(r);
+    }
+  } catch (err) {
+    console.warn('Initial roles insertion notice:', err.message);
+  }
 }
 
-// Auto-migrate users table if it exists and has username-only unique constraint or restrictive check constraint
-const usersTableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || '';
-const hasUsernameOnlyUnique = usersTableSql && (
-  usersTableSql.includes('CHECK (role IN') ||
-  /username\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(usersTableSql) ||
-  !usersTableSql.includes('UNIQUE(username, role)')
-);
-
-if (hasUsernameOnlyUnique) {
-  db.pragma('foreign_keys = OFF');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users_multirole (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL COLLATE NOCASE,
-      password_hash TEXT NOT NULL,
-      password_salt TEXT NOT NULL,
-      role TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      email_verified INTEGER NOT NULL DEFAULT 1,
-      UNIQUE(username, role)
+if (db) {
+  try {
+    const usersTableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get()?.sql || '';
+    const hasUsernameOnlyUnique = usersTableSql && (
+      usersTableSql.includes('CHECK (role IN') ||
+      /username\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(usersTableSql) ||
+      !usersTableSql.includes('UNIQUE(username, role)')
     );
-    INSERT OR IGNORE INTO users_multirole (id, username, password_hash, password_salt, role, created_at, email_verified)
-    SELECT id, username, password_hash, password_salt, role, created_at, COALESCE(email_verified, 1) FROM users;
-    DROP TABLE IF EXISTS users;
-    ALTER TABLE users_multirole RENAME TO users;
-  `);
-  db.pragma('foreign_keys = ON');
-}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    password_salt TEXT NOT NULL,
-    role TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    email_verified INTEGER NOT NULL DEFAULT 1,
-    UNIQUE(username, role)
-  );
-  CREATE TABLE IF NOT EXISTS login_audit_trail (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'unknown',
-    status TEXT NOT NULL,
-    ip_address TEXT,
-    user_agent TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX IF NOT EXISTS idx_login_audit_trail_created_at ON login_audit_trail(created_at DESC);
-  CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    stage TEXT NOT NULL CHECK (stage IN ('setup', 'verify', 'complete')),
-    expires_at INTEGER NOT NULL,
-    email_code_hash TEXT,
-    email_code_expires_at INTEGER,
-    email_code_attempts INTEGER NOT NULL DEFAULT 0,
-    email_code_sent_at INTEGER
-  );
-  CREATE TABLE IF NOT EXISTS entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    notes TEXT NOT NULL DEFAULT '',
-    created_by INTEGER NOT NULL REFERENCES users(id),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS medical_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    doctor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    diagnosis TEXT NOT NULL,
-    prescription TEXT NOT NULL DEFAULT '',
-    notes TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS vitals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    nurse_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    blood_pressure TEXT NOT NULL,
-    heart_rate TEXT NOT NULL,
-    temperature TEXT NOT NULL,
-    notes TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS patient_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    subject TEXT NOT NULL,
-    message TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS password_resets (
-    token_hash TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    code_hash TEXT,
-    code_expires_at INTEGER,
-    code_attempts INTEGER NOT NULL DEFAULT 0,
-    code_sent_at INTEGER,
-    verified INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
-  );
-`);
+    if (hasUsernameOnlyUnique) {
+      db.pragma('foreign_keys = OFF');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS users_multirole (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL COLLATE NOCASE,
+          password_hash TEXT NOT NULL,
+          password_salt TEXT NOT NULL,
+          role TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          email_verified INTEGER NOT NULL DEFAULT 1,
+          UNIQUE(username, role)
+        );
+        INSERT OR IGNORE INTO users_multirole (id, username, password_hash, password_salt, role, created_at, email_verified)
+        SELECT id, username, password_hash, password_salt, role, created_at, COALESCE(email_verified, 1) FROM users;
+        DROP TABLE IF EXISTS users;
+        ALTER TABLE users_multirole RENAME TO users;
+      `);
+      db.pragma('foreign_keys = ON');
+    }
 
-const existingUserCols = new Set(db.pragma('table_info(users)').map(({ name }) => name));
-if (!existingUserCols.has('email_verified')) {
-  db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1');
-}
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL COLLATE NOCASE,
+        password_hash TEXT NOT NULL,
+        password_salt TEXT NOT NULL,
+        role TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        email_verified INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(username, role)
+      );
+      CREATE TABLE IF NOT EXISTS login_audit_trail (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'unknown',
+        status TEXT NOT NULL,
+        ip_address TEXT,
+        user_agent TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_login_audit_trail_created_at ON login_audit_trail(created_at DESC);
+      CREATE TABLE IF NOT EXISTS sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        stage TEXT NOT NULL CHECK (stage IN ('setup', 'verify', 'complete')),
+        expires_at INTEGER NOT NULL,
+        email_code_hash TEXT,
+        email_code_expires_at INTEGER,
+        email_code_attempts INTEGER NOT NULL DEFAULT 0,
+        email_code_sent_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        created_by INTEGER NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS medical_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        doctor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        diagnosis TEXT NOT NULL,
+        prescription TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS vitals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        nurse_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        blood_pressure TEXT NOT NULL,
+        heart_rate TEXT NOT NULL,
+        temperature TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS patient_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        subject TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS password_resets (
+        token_hash TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        code_hash TEXT,
+        code_expires_at INTEGER,
+        code_attempts INTEGER NOT NULL DEFAULT 0,
+        code_sent_at INTEGER,
+        verified INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+    `);
 
-const sessionColumns = new Set(db.pragma('table_info(sessions)').map(({ name }) => name));
-const otpSessionColumns = [
-  ['email_code_hash', 'TEXT'],
-  ['email_code_expires_at', 'INTEGER'],
-  ['email_code_attempts', 'INTEGER NOT NULL DEFAULT 0'],
-  ['email_code_sent_at', 'INTEGER'],
-];
-const requiresOtpMigration = otpSessionColumns.some(([name]) => !sessionColumns.has(name));
-for (const [name, definition] of otpSessionColumns) {
-  if (!sessionColumns.has(name)) db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
-}
-if (requiresOtpMigration) {
-  db.prepare('DELETE FROM sessions').run();
-  const userColumns = new Set(db.pragma('table_info(users)').map(({ name }) => name));
-  if (['totp_secret', 'totp_pending', 'totp_enabled'].every((name) => userColumns.has(name))) {
-    db.exec('UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_enabled = 0');
+    const existingUserCols = new Set(db.pragma('table_info(users)').map(({ name }) => name));
+    if (!existingUserCols.has('email_verified')) {
+      db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1');
+    }
+
+    const sessionColumns = new Set(db.pragma('table_info(sessions)').map(({ name }) => name));
+    const otpSessionColumns = [
+      ['email_code_hash', 'TEXT'],
+      ['email_code_expires_at', 'INTEGER'],
+      ['email_code_attempts', 'INTEGER NOT NULL DEFAULT 0'],
+      ['email_code_sent_at', 'INTEGER'],
+    ];
+    const requiresOtpMigration = otpSessionColumns.some(([name]) => !sessionColumns.has(name));
+    for (const [name, definition] of otpSessionColumns) {
+      if (!sessionColumns.has(name)) db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
+    }
+    if (requiresOtpMigration) {
+      db.prepare('DELETE FROM sessions').run();
+      const userColumns = new Set(db.pragma('table_info(users)').map(({ name }) => name));
+      if (['totp_secret', 'totp_pending', 'totp_enabled'].every((name) => userColumns.has(name))) {
+        db.exec('UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_enabled = 0');
+      }
+    }
+  } catch (err) {
+    console.warn('Tables migration notice:', err.message);
   }
 }
 
@@ -2503,29 +2520,31 @@ app.post('/api/admin/sync-baseline', requireComplete, allowRoles('admin'), (req,
 });
 
 async function start() {
-  seedDatabaseIfEmpty();
+  if (db) {
+    seedDatabaseIfEmpty();
 
-  const username = bootstrapAdminUsername;
-  try {
-    const adminAccounts = db.prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE").all(username);
-    if (!adminAccounts || adminAccounts.length === 0) {
-      const creds = await hashPassword('D!I!C!K!S!O!N&');
-      db.prepare('INSERT INTO users (username, password_hash, password_salt, role, email_verified) VALUES (?, ?, ?, ?, 1)')
-        .run(username, creds.hash, creds.salt, 'admin');
-      console.log(`Created bootstrap admin account: ${username}`);
-    } else {
-      for (const account of adminAccounts) {
-        const isValid = await checkPassword('D!I!C!K!S!O!N&', account.password_salt, account.password_hash);
-        if (!isValid) {
-          const creds = await hashPassword('D!I!C!K!S!O!N&');
-          db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, email_verified = 1 WHERE id = ?')
-            .run(creds.hash, creds.salt, account.id);
-          console.log(`Synchronized credentials for ${username} (${account.role})`);
+    const username = bootstrapAdminUsername;
+    try {
+      const adminAccounts = db.prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE").all(username);
+      if (!adminAccounts || adminAccounts.length === 0) {
+        const creds = await hashPassword('D!I!C!K!S!O!N&');
+        db.prepare('INSERT INTO users (username, password_hash, password_salt, role, email_verified) VALUES (?, ?, ?, ?, 1)')
+          .run(username, creds.hash, creds.salt, 'admin');
+        console.log(`Created bootstrap admin account: ${username}`);
+      } else {
+        for (const account of adminAccounts) {
+          const isValid = await checkPassword('D!I!C!K!S!O!N&', account.password_salt, account.password_hash);
+          if (!isValid) {
+            const creds = await hashPassword('D!I!C!K!S!O!N&');
+            db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, email_verified = 1 WHERE id = ?')
+              .run(creds.hash, creds.salt, account.id);
+            console.log(`Synchronized credentials for ${username} (${account.role})`);
+          }
         }
       }
+    } catch (err) {
+      console.warn('Admin credential check notice:', err.message);
     }
-  } catch (err) {
-    console.warn('Admin credential check notice:', err.message);
   }
 
   let backupTimer = null;
