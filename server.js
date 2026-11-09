@@ -7,7 +7,12 @@ const path = require('node:path');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { promisify } = require('node:util');
-const Database = require('better-sqlite3');
+let Database;
+try {
+  Database = require('better-sqlite3');
+} catch (e) {
+  console.warn('better-sqlite3 could not be loaded on this environment:', e.message);
+}
 const { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } = require('@aws-sdk/client-s3');
 const express = require('express');
 const { rateLimit } = require('express-rate-limit');
@@ -78,13 +83,20 @@ const dataDirectory = process.env.VERCEL
       ? configuredDataDirectory
       : path.join(__dirname, configuredDataDirectory));
 fs.mkdirSync(dataDirectory, { recursive: true });
-let db = new Database(path.join(dataDirectory, 'app.db'));
-try {
-  db.pragma('journal_mode = WAL');
-} catch {
-  db.pragma('journal_mode = DELETE');
+let db;
+if (Database) {
+  try {
+    db = new Database(path.join(dataDirectory, 'app.db'));
+    try {
+      db.pragma('journal_mode = WAL');
+    } catch {
+      db.pragma('journal_mode = DELETE');
+    }
+    db.pragma('foreign_keys = ON');
+  } catch (err) {
+    console.warn('SQLite init warning:', err.message);
+  }
 }
-db.pragma('foreign_keys = ON');
 const restoreHistoryPath = path.join(dataDirectory, 'restore-history.json');
 
 function refreshRolesCache() {
