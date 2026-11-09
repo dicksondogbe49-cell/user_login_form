@@ -72,9 +72,11 @@ function requireConfig() {
 
 requireConfig();
 
-const dataDirectory = path.isAbsolute(configuredDataDirectory)
-  ? configuredDataDirectory
-  : path.join(__dirname, configuredDataDirectory);
+const dataDirectory = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'hospital-data')
+  : (path.isAbsolute(configuredDataDirectory)
+      ? configuredDataDirectory
+      : path.join(__dirname, configuredDataDirectory));
 fs.mkdirSync(dataDirectory, { recursive: true });
 let db = new Database(path.join(dataDirectory, 'app.db'));
 try {
@@ -2515,7 +2517,7 @@ async function start() {
   }
 
   let backupTimer = null;
-  if (autoBackupMinutes > 0) {
+  if (!process.env.VERCEL && autoBackupMinutes > 0) {
     backupTimer = setInterval(() => {
       runDatabaseBackup('auto').catch((error) => console.error('Automatic backup failed:', error));
     }, autoBackupMinutes * 60 * 1000);
@@ -2523,26 +2525,30 @@ async function start() {
     console.log(`Automatic backups enabled every ${autoBackupMinutes} minutes${awsS3Configured ? ` to AWS S3 bucket ${awsS3Bucket}` : ' (local snapshots; AWS S3 not configured)'}`);
   }
 
-  const server = app.listen(port, () => console.log(`Login app running at http://localhost:${port}`));
+  if (!process.env.VERCEL) {
+    const server = app.listen(port, () => console.log(`Login app running at http://localhost:${port}`));
 
-  const shutdown = async (signal) => {
-    console.log(`Received ${signal}, shutting down gracefully...`);
-    if (backupTimer) clearInterval(backupTimer);
-    server.close(async () => {
-      await liveBackupQueue.catch(() => {});
-      awsS3Client?.destroy();
-      try {
-        db.close();
-      } catch {}
-      process.exit(0);
-    });
-  };
+    const shutdown = async (signal) => {
+      console.log(`Received ${signal}, shutting down gracefully...`);
+      if (backupTimer) clearInterval(backupTimer);
+      server.close(async () => {
+        await liveBackupQueue.catch(() => {});
+        awsS3Client?.destroy();
+        try {
+          db.close();
+        } catch {}
+        process.exit(0);
+      });
+    };
 
-  process.once('SIGINT', () => shutdown('SIGINT'));
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
+    process.once('SIGINT', () => shutdown('SIGINT'));
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
+  }
 }
 
-start().catch((error) => {
+const startPromise = start().catch((error) => {
   console.error(error.message);
   process.exitCode = 1;
 });
+
+module.exports = { app, startPromise };
